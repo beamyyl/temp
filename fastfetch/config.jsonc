@@ -1,0 +1,118 @@
+{
+    "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+
+    "logo": {
+        "source": "arch",
+        "color": {
+            "1": "35",
+            "2": "2"
+        }
+    },
+
+    "display": {
+        "separator": " ",
+        "bar": {
+            "char": {
+                "elapsed": "■",
+                "remaining": " "
+            },
+            "width": 18,
+            "color": {
+                "elapsed": "2"
+            }
+        },
+        "percent": {
+            "type": 2
+        }
+    },
+
+    "modules": [
+        {
+            "type": "host",
+            "key": "╭─",
+            "keyColor": "35"
+        },
+        {
+            "type": "cpu",
+            "key": "├─",
+            "keyColor": "35"
+        },
+        {
+            "type": "gpu",
+            "key": "├─󰍛",
+            "keyColor": "35"
+        },
+        {
+            "type": "disk",
+            "key": "├─",
+            "keyColor": "35",
+            "folders": "/"
+        },
+        {
+            "type": "memory",
+            "key": "╰─󰍛",
+            "keyColor": "35"
+        },
+        "break",
+
+        {
+            "type": "os",
+            "key": "╭─",
+            "keyColor": "2"
+        },
+        {
+            "type": "kernel",
+            "key": "├─",
+            "keyColor": "2"
+        },
+        {
+            "type": "packages",
+            "key": "├─󰏖",
+            "keyColor": "2"
+        },
+        {
+            "type": "shell",
+            "key": "╰─",
+            "keyColor": "2"
+        },
+        "break",
+
+        {
+            "type": "uptime",
+            "key": "╭─󰅐",
+            "keyColor": "35"
+        },
+        {
+            "type": "de",
+            "key": "├─",
+            "keyColor": "35"
+        },
+        {
+            "type": "wm",
+            "key": "├─",
+            "keyColor": "35"
+        },
+        {
+            "type": "wmtheme",
+            "key": "├─󰉼",
+            "keyColor": "35"
+        },
+        {
+            "type": "command",
+            "key": "├─󰌽",
+            "keyColor": "35",
+            "text": "echo $(( ($(date +%s) - $(stat -c %W /)) / 86400 )) days"
+        },
+        {
+            "type": "terminal",
+            "key": "╰─",
+            "keyColor": "35"
+        },
+        "break",
+        {
+            "type": "colors",
+            "paddingLeft": 2,
+            "symbol": "circle"
+        }
+    ]
+}
