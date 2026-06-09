@@ -48,5 +48,4 @@
                          (mount-point "/")
                          (device (uuid "1894ede5-64cf-410d-a414-48b9318c41ea"))
                          (type "ext4"))
-                       %base-file-syst
-                       ems)))
+                       %base-file-systems)))
