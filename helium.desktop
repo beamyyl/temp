@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Helium
+Exec=/home/beamy/Documents/Helium/helium.AppImage
+Icon=/home/beamy/Documents/Helium/heliumlogo.png
+Type=Application
+Categories=Network;WebBrowser;
+Terminal=false
+MimeType=x-scheme-handler/unknown;x-scheme-handler/about;x-scheme-handler/https;x-scheme-handler/http;text/html;
