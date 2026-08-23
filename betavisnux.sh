@@ -339,7 +339,7 @@ if [ "\${INIT_SYSTEM}" = "systemd" ]; then
 
 else
 
-    pacman -S plasma konsole dolphin kitty fastfetch sddm sddm-\${INIT_SYSTEM} networkmanager networkmanager-\${INIT_SYSTEM} dbus dbus-\${INIT_SYSTEM} vim nano sudo --noconfirm
+    pacman -S plasma konsole dolphin kitty fastfetch sddm sddm-\${INIT_SYSTEM} turnstile turnstile-\${INIT_SYSTEM} pipewire pipewire-\${INIT_SYSTEM} pipewire-pulse pipewire-pulse-\${INIT_SYSTEM} wireplumber wireplumber-\${INIT_SYSTEM} networkmanager networkmanager-\${INIT_SYSTEM} dbus dbus-\${INIT_SYSTEM} vim nano sudo --noconfirm
 
     case "\${INIT_SYSTEM}" in
         openrc)
@@ -347,10 +347,11 @@ else
             rc-update add elogind default
             rc-update add NetworkManager default
             rc-update add sddm default
+            rc-update add turnstiled default
             ;;
         runit)
             mkdir -p /etc/runit/runsvdir/default
-            for service in dbus elogind NetworkManager sddm; do
+            for service in dbus elogind NetworkManager sddm turnstiled; do
                 if [ -d "/etc/runit/sv/\${service}" ] && [ ! -e "/etc/runit/runsvdir/default/\${service}" ]; then
                     ln -s "/etc/runit/sv/\${service}" "/etc/runit/runsvdir/default/\${service}"
                 fi
@@ -360,7 +361,8 @@ else
         ln -s ../dbus           /etc/dinit.d/boot.d/
         ln -s ../elogind        /etc/dinit.d/boot.d/
         ln -s ../NetworkManager /etc/dinit.d/boot.d/
-        ln -s ../sddm         /etc/dinit.d/boot.d/
+        ln -s ../sddm           /etc/dinit.d/boot.d/
+        ln -s ../turnstiled     /etc/dinit.d/boot.d/
             ;;
     esac
 
