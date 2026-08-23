@@ -111,14 +111,12 @@ ask "  1) systemd"
 ask "  2) dinit"
 ask "  3) openrc"
 ask "  4) runit"
-ask "  5) s6"
 read -rp "  Choice [1-5]: " INIT_CHOICE
 case "$INIT_CHOICE" in
     1) INIT_SYSTEM="systemd" ;;
     2) INIT_SYSTEM="dinit" ;;
     3) INIT_SYSTEM="openrc" ;;
     4) INIT_SYSTEM="runit" ;;
-    5) INIT_SYSTEM="s6" ;;
     *) die "Invalid choice. Enter 1, 2, 3, 4, or 5." ;;
 esac
 echo ""
@@ -235,7 +233,6 @@ EOF
         openrc) INIT_PKGS="openrc elogind-openrc" ;;
         runit)  INIT_PKGS="runit runit-rc elogind-runit" ;;
         dinit)  INIT_PKGS="dinit elogind-dinit" ;;
-        s6)     INIT_PKGS="s6-base s6-linux-init s6-rc s6-scripts elogind-s6" ;;
     esac
 
     pacstrap -C "$ARTIX_CONF" /mnt base base-devel linux linux-firmware sof-firmware \
@@ -364,12 +361,6 @@ else
         ln -s ../elogind        /etc/dinit.d/boot.d/
         ln -s ../NetworkManager /etc/dinit.d/boot.d/
         ln -s ../sddm         /etc/dinit.d/boot.d/
-            ;;
-        s6)
-            s6-rc-bundle-update add default dbus
-            s6-rc-bundle-update add default elogind
-            s6-rc-bundle-update add default NetworkManager
-            s6-rc-bundle-update add default sddm
             ;;
     esac
 
