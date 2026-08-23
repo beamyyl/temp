@@ -405,7 +405,7 @@ if [ "\${CREATE_USER}" = "y" ]; then
         passwd "\${NEW_USER}"
 
         info "Cloning and setting up dotfiles for '\${NEW_USER}'..."
-        su - "\${NEW_USER}" -c "cd ~ && mkdir -p ~/.config && git clone https://github.com/beamyyl/maindots && cp -r maindots/* ~/.config/ && rm -rf maindots && git clone https://github.com/realv1sta/larphub && rm -f ~/.config/fastfetch/logo.txt && mkdir -p ~/.config/fastfetch && cp larphub/visnuxlogo.txt ~/.config/fastfetch/logo.txt && rm -rf larphub && [ ! -f ~/.config/fastfetch/config.jsonc ] || sed -i 's/\"top\": 2/\"top\": 0/' ~/.config/fastfetch/config.jsonc"
+        su - "\${NEW_USER}" -c "cd ~ && mkdir -p ~/.config && git clone https://github.com/beamyyl/maindots && cp -r maindots/* ~/.config/ && rm -rf maindots && [ ! -f ~/.config/fastfetch/config.jsonc ] || sed -i 's/\"top\": 2/\"top\": 0/' ~/.config/fastfetch/config.jsonc"
         info "Dotfiles installed successfully."
         info "User setup complete."
     fi
