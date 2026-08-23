@@ -360,10 +360,10 @@ else
             done
             ;;
         dinit)
-            dinitctl enable dbus
-            dinitctl enable elogind
-            dinitctl enable NetworkManager
-            dinitctl enable sddm
+        ln -s ../dbus           /etc/dinit.d/boot.d/
+        ln -s ../elogind        /etc/dinit.d/boot.d/
+        ln -s ../NetworkManager /etc/dinit.d/boot.d/
+        ln -s ../sddm         /etc/dinit.d/boot.d/
             ;;
         s6)
             s6-rc-bundle-update add default dbus
