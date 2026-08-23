@@ -35,7 +35,7 @@ command -v pacman &>/dev/null || die "'pacman' not found. Are you booted from th
 clear
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║             VISNUX INSTALLER                             ║${NC}"
+echo -e "${CYAN}║              VISNUX INSTALLER                            ║${NC}"
 echo -e "${CYAN}╚══════════════════════════════════════════════════════════╝${NC}"
 echo ""
 info "This script will install Visnux to /mnt."
@@ -126,7 +126,14 @@ echo ""
 # =============================================================================
 # Multilib
 # =============================================================================
-ENABLE_MULTILIB="yes"
+ask "Enable the multilib repository (for 32-bit packages)? [Y/n]"
+read -rp "  Choice: " MULTILIB_CHOICE
+if [[ "$MULTILIB_CHOICE" =~ ^[Nn]$ ]]; then
+    ENABLE_MULTILIB="no"
+else
+    ENABLE_MULTILIB="yes"
+fi
+echo ""
 
 # =============================================================================
 # System configuration
@@ -166,7 +173,7 @@ if [ "$INIT_SYSTEM" = "systemd" ]; then
 
     if grep -q '^\[multilib\]$' /mnt/etc/pacman.conf; then
         sed -i '/^\[multilib\]/,/^\[/ s#^Include = /etc/pacman.d/mirrorlist$#Include = /etc/pacman.d/mirrorlist#' /mnt/etc/pacman.conf
-    else
+    elif [ "$ENABLE_MULTILIB" = "yes" ]; then
         cat >> /mnt/etc/pacman.conf <<'EOF'
 
 [multilib]
@@ -174,20 +181,9 @@ Include = /etc/pacman.d/mirrorlist
 EOF
     fi
 else
-    info "Preparing Artix repositories..."
+    info "Preparing Artix repositories for pacstrap..."
 
-    LIVE_PACMAN_CONF="/tmp/visnux-live-pacman.conf"
-    LIVE_MIRRORLIST="/tmp/visnux-live-mirrorlist"
     ARTIX_BOOTSTRAP_CONF="/tmp/visnux-artix-bootstrap.conf"
-    ARTIX_CONF="/tmp/visnux-artix.conf"
-
-    cp /etc/pacman.conf "$LIVE_PACMAN_CONF"
-    cp /etc/pacman.d/mirrorlist "$LIVE_MIRRORLIST"
-
-    if pacman -Qq pacman-mirrorlist &>/dev/null; then
-        pacman -Rnsdd --noconfirm pacman-mirrorlist
-    fi
-
     cat > "$ARTIX_BOOTSTRAP_CONF" <<EOF
 [options]
 Architecture = auto
@@ -199,12 +195,12 @@ SigLevel = Never
 Server = https://mirrors.rit.edu/artixlinux/\$repo/os/\$arch
 EOF
 
-    info "Installing Artix keyring and mirrorlist..."
-    pacman --config "$ARTIX_BOOTSTRAP_CONF" -Sy --noconfirm artix-keyring artix-mirrorlist
-
+    info "Installing Artix keyring on the live system..."
+    pacman --config "$ARTIX_BOOTSTRAP_CONF" -Sy --noconfirm artix-keyring
     pacman-key --init
     pacman-key --populate artix
 
+    ARTIX_CONF="/tmp/visnux-artix.conf"
     cat > "$ARTIX_CONF" <<EOF
 [options]
 Architecture = auto
@@ -214,47 +210,34 @@ SigLevel = Required DatabaseOptional
 LocalFileSigLevel = Optional
 
 [system]
-Include = /etc/pacman.d/mirrorlist
-
+Server = https://mirrors.rit.edu/artixlinux/\$repo/os/\$arch
 [world]
-Include = /etc/pacman.d/mirrorlist
-
+Server = https://mirrors.rit.edu/artixlinux/\$repo/os/\$arch
 [galaxy]
-Include = /etc/pacman.d/mirrorlist
+Server = https://mirrors.rit.edu/artixlinux/\$repo/os/\$arch
 EOF
 
-    info "Installing Arch repository support..."
-    pacman --config "$ARTIX_CONF" -Sy --noconfirm artix-archlinux-support
-    pacman-key --populate archlinux
+    info "Bootstrapping Visnux (Artix base)..."
+    command -v pacstrap &>/dev/null || die "'pacstrap' not found."
+    
+    INIT_PKGS=""
+    case "$INIT_SYSTEM" in
+        openrc) INIT_PKGS="openrc elogind-openrc" ;;
+        runit)  INIT_PKGS="runit runit-rc elogind-runit" ;;
+        dinit)  INIT_PKGS="dinit elogind-dinit" ;;
+        s6)     INIT_PKGS="s6-base s6-linux-init s6-rc s6-scripts elogind-s6" ;;
+    esac
 
-    [ -f /etc/pacman.d/mirrorlist ] || die "Artix mirrorlist was not installed."
-    [ -f /etc/pacman.d/mirrorlist-arch ] || die "Arch mirrorlist was not installed."
+    pacstrap -C "$ARTIX_CONF" /mnt base base-devel linux linux-firmware sof-firmware \
+        artix-keyring artix-mirrorlist $INIT_PKGS
 
-    cp /etc/pacman.d/mirrorlist-arch /tmp/visnux-mirrorlist-arch
-    cp "$LIVE_PACMAN_CONF" /mnt/etc/pacman.conf
-    cp /etc/pacman.d/mirrorlist /mnt/etc/pacman.d/mirrorlist
-    cp /tmp/visnux-mirrorlist-arch /mnt/etc/pacman.d/mirrorlist-arch
+    info "Installing Arch repository support inside the chroot..."
+    arch-chroot /mnt pacman -Sy --noconfirm artix-archlinux-support
+    arch-chroot /mnt pacman-key --populate archlinux
 
-    sed -i \
-        -e 's/^\[core\]$/[system]/' \
-        -e 's/^\[extra\]$/[world]/' \
-        /mnt/etc/pacman.conf
-
-    if ! grep -q '^\[galaxy\]$' /mnt/etc/pacman.conf; then
-        cat >> /mnt/etc/pacman.conf <<'EOF'
-
-[galaxy]
-Include = /etc/pacman.d/mirrorlist
-EOF
-    fi
-
+    info "Configuring Visnux pacman.conf..."
     if [ "$ENABLE_MULTILIB" = "yes" ]; then
-        if grep -q '^\[multilib\]$' /mnt/etc/pacman.conf; then
-            sed -i '/^\[multilib\]/,/^\[/ s#^Include = /etc/pacman.d/mirrorlist$#Include = /etc/pacman.d/mirrorlist-arch#' /mnt/etc/pacman.conf
-            if ! sed -n '/^\[multilib\]/,/^\[/p' /mnt/etc/pacman.conf | grep -q '^Include = /etc/pacman.d/mirrorlist-arch$'; then
-                sed -i '/^\[multilib\]/a Include = /etc/pacman.d/mirrorlist-arch' /mnt/etc/pacman.conf
-            fi
-        else
+        if ! grep -q '^\[multilib\]$' /mnt/etc/pacman.conf; then
             cat >> /mnt/etc/pacman.conf <<'EOF'
 
 [multilib]
@@ -262,25 +245,6 @@ Include = /etc/pacman.d/mirrorlist-arch
 EOF
         fi
     fi
-
-    command -v basestrap &>/dev/null || die "'basestrap' not found after installing artools support."
-    command -v fstabgen &>/dev/null || die "'fstabgen' not found after installing artools support."
-    command -v artix-chroot &>/dev/null || die "'artix-chroot' not found after installing artools support."
-
-    case "$INIT_SYSTEM" in
-        openrc)
-            basestrap /mnt base base-devel openrc linux linux-firmware sof-firmware
-            ;;
-        runit)
-            basestrap /mnt base base-devel runit runit-rc linux linux-firmware sof-firmware
-            ;;
-        dinit)
-            basestrap /mnt base base-devel dinit linux linux-firmware sof-firmware
-            ;;
-        s6)
-            basestrap /mnt base base-devel s6-base s6-linux-init s6-rc s6-scripts linux linux-firmware sof-firmware
-            ;;
-    esac
 fi
 
 # =============================================================================
@@ -290,14 +254,9 @@ info "============================================================"
 info " FSTAB"
 info "============================================================"
 
-if [ "$INIT_SYSTEM" = "systemd" ]; then
-    command -v genfstab &>/dev/null || die "'genfstab' not found."
-    info "Generating /etc/fstab..."
-    genfstab -U /mnt > /mnt/etc/fstab
-else
-    info "Generating /etc/fstab..."
-    fstabgen -U /mnt > /mnt/etc/fstab
-fi
+command -v genfstab &>/dev/null || die "'genfstab' not found."
+info "Generating /etc/fstab..."
+genfstab -U /mnt > /mnt/etc/fstab
 
 info "fstab contents:"
 cat /mnt/etc/fstab
@@ -364,7 +323,7 @@ if [ "\${INIT_SYSTEM}" = "systemd" ]; then
 
 else
 
-    pacman -S plasma konsole dolphin kitty fastfetch sddm sddm-\${INIT_SYSTEM} networkmanager networkmanager-\${INIT_SYSTEM} elogind elogind-\${INIT_SYSTEM} dbus dbus-\${INIT_SYSTEM} vim nano sudo --noconfirm
+    pacman -S plasma konsole dolphin kitty fastfetch sddm sddm-\${INIT_SYSTEM} networkmanager networkmanager-\${INIT_SYSTEM} dbus dbus-\${INIT_SYSTEM} vim nano sudo --noconfirm
 
     case "\${INIT_SYSTEM}" in
         openrc)
@@ -467,11 +426,7 @@ info " ENTERING CHROOT"
 info "============================================================"
 echo ""
 
-if [ "$INIT_SYSTEM" = "systemd" ]; then
-    arch-chroot /mnt /bin/bash /root/chroot-install.sh
-else
-    artix-chroot /mnt /bin/bash /root/chroot-install.sh
-fi
+arch-chroot /mnt /bin/bash /root/chroot-install.sh
 
 # =============================================================================
 # Cleanup
@@ -486,10 +441,7 @@ if [ "$INIT_SYSTEM" != "systemd" ]; then
     restore_live
     rm -f \
         "$ARTIX_BOOTSTRAP_CONF" \
-        "$ARTIX_CONF" \
-        /tmp/visnux-mirrorlist-arch \
-        "$LIVE_PACMAN_CONF" \
-        "$LIVE_MIRRORLIST"
+        "$ARTIX_CONF"
 fi
 
 info "Unmounting filesystems..."
