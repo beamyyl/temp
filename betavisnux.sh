@@ -386,6 +386,7 @@ else
 fi
 
 sed -i 's/GRUB_DISTRIBUTOR="Arch"/GRUB_DISTRIBUTOR="Visnux"/' /etc/default/grub
+sed -i 's/GRUB_DISTRIBUTOR="Artix"/GRUB_DISTRIBUTOR="Visnux"/' /etc/default/grub
 grub-mkconfig -o /boot/grub/grub.cfg
 
 echo ""
