@@ -242,14 +242,16 @@ EOF
         artix-keyring artix-mirrorlist $INIT_PKGS
 
     info "Fixing mirrorlist clobber and applying pacman tweaks..."
-    # pacstrap copies the host's (Arch) mirrorlist, which forces artix-mirrorlist to save as .pacnew
-    if [ -f /mnt/etc/pacman.d/mirrorlist.pacnew ]; then
-        mv /mnt/etc/pacman.d/mirrorlist.pacnew /mnt/etc/pacman.d/mirrorlist
-    fi
+    
+    # Brute-force a known-working Artix mirror so the chroot doesn't hang on Arch servers
+    echo 'Server = https://mirrors.rit.edu/artixlinux/$repo/os/$arch' > /mnt/etc/pacman.d/mirrorlist
 
     # Apply fast downloads to the new chroot before we install artix-archlinux-support
     sed -i 's/^#*ParallelDownloads = .*/ParallelDownloads = 12/' /mnt/etc/pacman.conf
     sed -i '/^ParallelDownloads = 12/a Color\nILoveCandy' /mnt/etc/pacman.conf
+    
+    # Reinstall the mirrorlist package purely inside the chroot to populate the rest of the mirrors
+    arch-chroot /mnt pacman -Sy --noconfirm artix-mirrorlist
 
     info "Installing Arch repository support inside the chroot..."
     arch-chroot /mnt pacman -Sy --noconfirm artix-archlinux-support
