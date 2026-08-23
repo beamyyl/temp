@@ -108,16 +108,16 @@ echo ""
 
 ask "Init system?"
 ask "  1) systemd"
-ask "  2) OpenRC"
-ask "  3) runit"
-ask "  4) dinit"
+ask "  2) dinit"
+ask "  3) openrc"
+ask "  4) runit"
 ask "  5) s6"
 read -rp "  Choice [1-5]: " INIT_CHOICE
 case "$INIT_CHOICE" in
     1) INIT_SYSTEM="systemd" ;;
-    2) INIT_SYSTEM="openrc" ;;
-    3) INIT_SYSTEM="runit" ;;
-    4) INIT_SYSTEM="dinit" ;;
+    2) INIT_SYSTEM="dinit" ;;
+    3) INIT_SYSTEM="openrc" ;;
+    4) INIT_SYSTEM="runit" ;;
     5) INIT_SYSTEM="s6" ;;
     *) die "Invalid choice. Enter 1, 2, 3, 4, or 5." ;;
 esac
