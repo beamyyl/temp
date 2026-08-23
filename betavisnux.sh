@@ -167,9 +167,17 @@ echo ""
 
 if [ "$INIT_SYSTEM" = "systemd" ]; then
     command -v pacstrap &>/dev/null || die "'pacstrap' not found."
+    
+    info "Enabling parallel downloads on host..."
+    sed -i 's/^#*ParallelDownloads = .*/ParallelDownloads = 12/' /etc/pacman.conf
+
     info "Installing base and the kernel..."
     pacman -Sy archlinux-keyring --noconfirm
     pacstrap /mnt base base-devel linux linux-firmware sof-firmware
+
+    info "Applying pacman tweaks to chroot..."
+    sed -i 's/^#*ParallelDownloads = .*/ParallelDownloads = 12/' /mnt/etc/pacman.conf
+    sed -i '/^ParallelDownloads = 12/a Color\nILoveCandy' /mnt/etc/pacman.conf
 
     if grep -q '^\[multilib\]$' /mnt/etc/pacman.conf; then
         sed -i '/^\[multilib\]/,/^\[/ s#^Include = /etc/pacman.d/mirrorlist$#Include = /etc/pacman.d/mirrorlist#' /mnt/etc/pacman.conf
@@ -189,6 +197,7 @@ else
 Architecture = auto
 Color
 CheckSpace
+ParallelDownloads = 12
 SigLevel = Never
 
 [system]
@@ -206,6 +215,7 @@ EOF
 Architecture = auto
 Color
 CheckSpace
+ParallelDownloads = 12
 SigLevel = Required DatabaseOptional
 LocalFileSigLevel = Optional
 
@@ -230,6 +240,16 @@ EOF
 
     pacstrap -C "$ARTIX_CONF" /mnt base base-devel linux linux-firmware sof-firmware \
         artix-keyring artix-mirrorlist $INIT_PKGS
+
+    info "Fixing mirrorlist clobber and applying pacman tweaks..."
+    # pacstrap copies the host's (Arch) mirrorlist, which forces artix-mirrorlist to save as .pacnew
+    if [ -f /mnt/etc/pacman.d/mirrorlist.pacnew ]; then
+        mv /mnt/etc/pacman.d/mirrorlist.pacnew /mnt/etc/pacman.d/mirrorlist
+    fi
+
+    # Apply fast downloads to the new chroot before we install artix-archlinux-support
+    sed -i 's/^#*ParallelDownloads = .*/ParallelDownloads = 12/' /mnt/etc/pacman.conf
+    sed -i '/^ParallelDownloads = 12/a Color\nILoveCandy' /mnt/etc/pacman.conf
 
     info "Installing Arch repository support inside the chroot..."
     arch-chroot /mnt pacman -Sy --noconfirm artix-archlinux-support
@@ -283,9 +303,6 @@ NEW_HOSTNAME="${NEW_HOSTNAME}"
 GRUB_DISK="${GRUB_DISK}"
 
 hwclock --systohc
-
-sed -i 's/^#*ParallelDownloads = .*/ParallelDownloads = 12/' /etc/pacman.conf
-sed -i '/^ParallelDownloads = 12/a Color\nILoveCandy' /etc/pacman.conf
 
 pacman -Sy --noconfirm git
 
