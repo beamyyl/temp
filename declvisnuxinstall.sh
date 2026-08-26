@@ -394,7 +394,7 @@ echo "LANG=en_US.UTF-8" > /etc/locale.conf
 # Desktop / system packages
 # =============================================================================
 
-if [ "${DECLARATIVE_MODE}" = "yes" ]; then
+if [ "\${DECLARATIVE_MODE}" = "yes" ]; then
     info "Declarative installation selected. Generating /etc/visnux/visnux.conf..."
 
     mkdir -p /etc/visnux /var/lib/vpk
@@ -402,28 +402,28 @@ if [ "${DECLARATIVE_MODE}" = "yes" ]; then
     DESKTOP_PKGS=""
     SERVICE_PKGS="networkmanager"
     ENABLED_SERVICES="NetworkManager"
-    if [ "${INIT_SYSTEM}" != "systemd" ]; then
-        SERVICE_PKGS="${SERVICE_PKGS} turnstile"
-        if [ "${INIT_SYSTEM}" = "openrc" ]; then
-            ENABLED_SERVICES="${ENABLED_SERVICES} turnstile"
+    if [ "\${INIT_SYSTEM}" != "systemd" ]; then
+        SERVICE_PKGS="\${SERVICE_PKGS} turnstile"
+        if [ "\${INIT_SYSTEM}" = "openrc" ]; then
+            ENABLED_SERVICES="\${ENABLED_SERVICES} turnstile"
         else
-            ENABLED_SERVICES="${ENABLED_SERVICES} turnstiled"
+            ENABLED_SERVICES="\${ENABLED_SERVICES} turnstiled"
         fi
     fi
 
-    if [ "${DESKTOP_ENV}" = "kde" ]; then
+    if [ "\${DESKTOP_ENV}" = "kde" ]; then
         DESKTOP_METAPKGS="plasma"
         DESKTOP_PKGS="ark konsole dolphin xdg-desktop-portal-kde wl-clipboard"
-    elif [ "${DESKTOP_ENV}" = "xfce" ]; then
+    elif [ "\${DESKTOP_ENV}" = "xfce" ]; then
         DESKTOP_METAPKGS="xfce4"
         DESKTOP_PKGS="xfce4-whiskermenu-plugin ark xclip maim xfce4-pulseaudio-plugin"
     else
         info "Skipping Desktop Environment installation."
     fi
 
-    if [ "${DESKTOP_ENV}" != "none" ]; then
-        SERVICE_PKGS="${SERVICE_PKGS} sddm power-profiles-daemon pipewire wireplumber pipewire-pulse"
-        ENABLED_SERVICES="${ENABLED_SERVICES} sddm power-profiles-daemon"
+    if [ "\${DESKTOP_ENV}" != "none" ]; then
+        SERVICE_PKGS="\${SERVICE_PKGS} sddm power-profiles-daemon pipewire wireplumber pipewire-pulse"
+        ENABLED_SERVICES="\${ENABLED_SERVICES} sddm power-profiles-daemon"
     fi
 
     cat > /etc/visnux/visnux.conf <<EOF
