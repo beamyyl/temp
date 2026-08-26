@@ -1,0 +1,80 @@
+#!/bin/bash
+# =============================================================================
+# vpk — Visnux Declarative Package Sync Tool
+# usage: vpk [--check | --sync | --path /path/to/manifest]
+# =============================================================================
+
+set -euo pipefail
+
+MANIFEST="/etc/visnux/packages.decl"
+ACTION="sync"
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+
+# Parse flags
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -c|--check) ACTION="check"; shift ;;
+        -s|--sync)  ACTION="sync"; shift ;;
+        -p|--path)  MANIFEST="$2"; shift 2 ;;
+        *) echo "Unknown option: $1"; exit 1 ;;
+    esac
+done
+
+if [[ ! -f "$MANIFEST" ]]; then
+    echo -e "${RED}[FAIL]${NC} Manifest standard path '$MANIFEST' not found!"
+    exit 1
+fi
+
+echo -e "${CYAN}[VPK]${NC} Reading manifest: $MANIFEST"
+
+# Parse package lists inside { ... } blocks across all sections
+DECLARED_PKGS=$(grep -E '^\s*pkgs\s*=' "$MANIFEST" | \
+    sed -E 's/.*\{([^}]+)\}.*/\1/' | \
+    tr ',' ' ' | \
+    tr -s ' ' '\n' | \
+    sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | \
+    grep -v '^$' | \
+    sort -u)
+
+if [[ -z "$DECLARED_PKGS" ]]; then
+    echo -e "${YELLOW}[WARN]${NC} No packages extracted from $MANIFEST"
+    exit 0
+fi
+
+# Store parsed manifest into array
+mapfile -t DECLARED_ARRAY <<< "$DECLARED_PKGS"
+echo -e "${GREEN}[INFO]${NC} ${#DECLARED_ARRAY[@]} declared packages parsed."
+
+# Query current explicitly/explicitly-installed packages
+INSTALLED_PKGS=$(pacman -Qq)
+
+MISSING=()
+for pkg in "${DECLARED_ARRAY[@]}"; do
+    if ! grep -qxfe "$pkg" <<< "$INSTALLED_PKGS"; then
+        MISSING+=("$pkg")
+    fi
+done
+
+# Output diff analysis
+if [[ ${#MISSING[@]} -eq 0 ]]; then
+    echo -e "${GREEN}[OK]${NC} System matches manifest state cleanly. Zero missing packages."
+    exit 0
+fi
+
+echo -e "${YELLOW}[DIFF]${NC} ${#MISSING[@]} declared package(s) missing from system:"
+printf '  - %s\n' "${MISSING[@]}"
+
+if [[ "$ACTION" == "check" ]]; then
+    exit 0
+fi
+
+# Execute sync
+echo -e "${CYAN}[SYNC]${NC} Synchronizing pacman state..."
+if [ "$(id -u)" -ne 0 ]; then
+    sudo pacman -S --needed --noconfirm "${MISSING[@]}"
+else
+    pacman -S --needed --noconfirm "${MISSING[@]}"
+fi
+
+echo -e "${GREEN}[OK]${NC} Sync complete!"
