@@ -980,15 +980,23 @@ user_service_enable() {
             chown -R "\$user:\$user" "\$home/.local"
             ;;
         dinit)
-            if command -v dinitctl >/dev/null 2>&1; then
-                if ! su "\$user" -c "dinitctl enable -u '\$service'"; then
-                    echo -e "\${YELLOW}[WARN]\${NC} dinit user service '\$service' for '\$user' could not be enabled yet."
-                    return 1
-                fi
+            local user_dinit_dir="\$home/.config/dinit.d"
+            mkdir -p "\$user_dinit_dir/boot.d"
+
+            local src=""
+            if [[ -e "/etc/dinit.d/user/\$service" ]]; then
+                src="/etc/dinit.d/user/\$service"
+            elif [[ -e "/usr/lib/dinit.d/user/\$service" ]]; then
+                src="/usr/lib/dinit.d/user/\$service"
+            elif [[ -e "\$user_dinit_dir/\$service" ]]; then
+                src="\$user_dinit_dir/\$service"
             else
-                echo -e "\${YELLOW}[WARN]\${NC} dinitctl not found; cannot enable user service '\$service'."
+                echo -e "\${YELLOW}[WARN]\${NC} dinit user service '\$service' not found for \$user."
                 return 1
             fi
+
+            ln -sfn "\$src" "\$user_dinit_dir/boot.d/\$service"
+            chown -R "\$user:\$user" "\$home/.config/dinit.d"
             ;;
     esac
 }
@@ -1003,11 +1011,7 @@ user_service_disable() {
         systemd) rm -f "\$home/.config/systemd/user/default.target.wants/\$service.service" ;;
         openrc) rm -f "\$home/.config/rc/runlevels/default/\$service" ;;
         runit) rm -f "\$home/.local/service/\$service" ;;
-        dinit)
-            if command -v dinitctl >/dev/null 2>&1; then
-                runuser -u "\$user" -- env HOME="\$home" dinitctl --user --offline disable "\$service" || true
-            fi
-            ;;
+        dinit) rm -f "\$home/.config/dinit.d/boot.d/\$service" ;;
     esac
 }
 
