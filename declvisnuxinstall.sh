@@ -436,8 +436,8 @@ pkgs = { linux, linux-headers, linux-firmware, sof-firmware }
 pkgs = { grub, efibootmgr }
 
 [desktop]
-metapkgs = { ${DESKTOP_METAPKGS} }
-pkgs = { ${DESKTOP_PKGS} }
+metapkgs = { \${DESKTOP_METAPKGS} }
+pkgs = { \${DESKTOP_PKGS} }
 
 [fonts]
 pkgs = { ttf-iosevka-nerd, ttf-adwaitamono-nerd }
@@ -446,8 +446,8 @@ pkgs = { ttf-iosevka-nerd, ttf-adwaitamono-nerd }
 pkgs = { git, papirus-icon-theme, neovim, nano, sudo, fish, flatpak, fastfetch, kitty }
 
 [services]
-pkgs = { ${SERVICE_PKGS} }
-enabled = { ${ENABLED_SERVICES} }
+pkgs = { \${SERVICE_PKGS} }
+enabled = { \${ENABLED_SERVICES} }
 
 [drivers]
 pkgs = { mesa, lib32-mesa, vulkan-intel, lib32-vulkan-intel, vulkan-radeon, lib32-vulkan-radeon, vulkan-nouveau, lib32-vulkan-nouveau, vulkan-swrast, lib32-vulkan-swrast, libva, intel-media-driver }
@@ -460,7 +460,7 @@ pkgs = { mesa, lib32-mesa, vulkan-intel, lib32-vulkan-intel, vulkan-radeon, lib3
 # beamy = { pipewire, wireplumber, pipewire-pulse }
 
 # Do NOT change the init line. If you wanna switch inits, clean reinstall is the safest way to do so.
-init = ${INIT_SYSTEM}
+init = \${INIT_SYSTEM}
 EOF
 
     cat > /usr/bin/vpk <<'VPK_EOF'
