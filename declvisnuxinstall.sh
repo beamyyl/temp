@@ -402,6 +402,10 @@ if [ "\${DECLARATIVE_MODE}" = "yes" ]; then
     DESKTOP_PKGS=""
     SERVICE_PKGS="networkmanager"
     ENABLED_SERVICES="NetworkManager"
+    if [ "\${INIT_SYSTEM}" != "systemd" ]; then
+        SERVICE_PKGS="\${SERVICE_PKGS} turnstile-\${INIT_SYSTEM}"
+        ENABLED_SERVICES="\${ENABLED_SERVICES} turnstiled"
+    fi
 
     if [ "\${DESKTOP_ENV}" = "kde" ]; then
         DESKTOP_METAPKGS="plasma"
@@ -1177,13 +1181,13 @@ fi
 
 info "Installing GRUB..."
 if [ "\${DECLARATIVE_MODE}" = "yes" ]; then
-    if [ "\${BOOT_MODE}" = "UEFI" ]; then
+    if [ "\${BOOT_MODE}" = "uefi" ]; then
         grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=Visnux --recheck
     else
         grub-install --recheck "\${GRUB_DISK}"
     fi
 else
-    if [ "\${BOOT_MODE}" = "UEFI" ]; then
+    if [ "\${BOOT_MODE}" = "uefi" ]; then
         pacman -S --noconfirm grub efibootmgr
         grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=Visnux --recheck
     else
