@@ -394,7 +394,7 @@ echo "LANG=en_US.UTF-8" > /etc/locale.conf
 # Desktop / system packages
 # =============================================================================
 
-if [ "\${DECLARATIVE_MODE}" = "yes" ]; then
+if [ "${DECLARATIVE_MODE}" = "yes" ]; then
     info "Declarative installation selected. Generating /etc/visnux/visnux.conf..."
 
     mkdir -p /etc/visnux /var/lib/vpk
@@ -402,24 +402,28 @@ if [ "\${DECLARATIVE_MODE}" = "yes" ]; then
     DESKTOP_PKGS=""
     SERVICE_PKGS="networkmanager"
     ENABLED_SERVICES="NetworkManager"
-    if [ "\${INIT_SYSTEM}" != "systemd" ]; then
-        SERVICE_PKGS="\${SERVICE_PKGS} turnstile"
-        ENABLED_SERVICES="\${ENABLED_SERVICES} turnstiled"
+    if [ "${INIT_SYSTEM}" != "systemd" ]; then
+        SERVICE_PKGS="${SERVICE_PKGS} turnstile"
+        if [ "${INIT_SYSTEM}" = "openrc" ]; then
+            ENABLED_SERVICES="${ENABLED_SERVICES} turnstile"
+        else
+            ENABLED_SERVICES="${ENABLED_SERVICES} turnstiled"
+        fi
     fi
 
-    if [ "\${DESKTOP_ENV}" = "kde" ]; then
+    if [ "${DESKTOP_ENV}" = "kde" ]; then
         DESKTOP_METAPKGS="plasma"
         DESKTOP_PKGS="ark konsole dolphin xdg-desktop-portal-kde wl-clipboard"
-    elif [ "\${DESKTOP_ENV}" = "xfce" ]; then
+    elif [ "${DESKTOP_ENV}" = "xfce" ]; then
         DESKTOP_METAPKGS="xfce4"
         DESKTOP_PKGS="xfce4-whiskermenu-plugin ark xclip maim xfce4-pulseaudio-plugin"
     else
         info "Skipping Desktop Environment installation."
     fi
 
-    if [ "\${DESKTOP_ENV}" != "none" ]; then
-        SERVICE_PKGS="\${SERVICE_PKGS} sddm power-profiles-daemon pipewire wireplumber pipewire-pulse"
-        ENABLED_SERVICES="\${ENABLED_SERVICES} sddm power-profiles-daemon"
+    if [ "${DESKTOP_ENV}" != "none" ]; then
+        SERVICE_PKGS="${SERVICE_PKGS} sddm power-profiles-daemon pipewire wireplumber pipewire-pulse"
+        ENABLED_SERVICES="${ENABLED_SERVICES} sddm power-profiles-daemon"
     fi
 
     cat > /etc/visnux/visnux.conf <<EOF
@@ -432,8 +436,8 @@ pkgs = { linux, linux-headers, linux-firmware, sof-firmware }
 pkgs = { grub, efibootmgr }
 
 [desktop]
-metapkgs = { \${DESKTOP_METAPKGS} }
-pkgs = { \${DESKTOP_PKGS} }
+metapkgs = { ${DESKTOP_METAPKGS} }
+pkgs = { ${DESKTOP_PKGS} }
 
 [fonts]
 pkgs = { ttf-iosevka-nerd, ttf-adwaitamono-nerd }
@@ -442,8 +446,8 @@ pkgs = { ttf-iosevka-nerd, ttf-adwaitamono-nerd }
 pkgs = { git, papirus-icon-theme, neovim, nano, sudo, fish, flatpak, fastfetch, kitty }
 
 [services]
-pkgs = { \${SERVICE_PKGS} }
-enabled = { \${ENABLED_SERVICES} }
+pkgs = { ${SERVICE_PKGS} }
+enabled = { ${ENABLED_SERVICES} }
 
 [drivers]
 pkgs = { mesa, lib32-mesa, vulkan-intel, lib32-vulkan-intel, vulkan-radeon, lib32-vulkan-radeon, vulkan-nouveau, lib32-vulkan-nouveau, vulkan-swrast, lib32-vulkan-swrast, libva, intel-media-driver }
@@ -456,7 +460,7 @@ pkgs = { mesa, lib32-mesa, vulkan-intel, lib32-vulkan-intel, vulkan-radeon, lib3
 # beamy = { pipewire, wireplumber, pipewire-pulse }
 
 # Do NOT change the init line. If you wanna switch inits, clean reinstall is the safest way to do so.
-init = \${INIT_SYSTEM}
+init = ${INIT_SYSTEM}
 EOF
 
     cat > /usr/bin/vpk <<'VPK_EOF'
