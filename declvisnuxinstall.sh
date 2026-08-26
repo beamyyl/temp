@@ -193,6 +193,17 @@ echo "    Desktop   : $DESKTOP_ENV"
 echo "    Multilib  : $ENABLE_MULTILIB"
 echo "    Hostname  : $NEW_HOSTNAME"
 echo ""
+echo -e "${CYAN}[INPUT]${NC} Do you want to install Visnux in a declarative way?"
+echo "  This installs VPK and uses /etc/visnux/visnux.conf."
+echo "  [y] Declarative (VPK)"
+echo "  [n] Traditional / imperative installer"
+read -rp "  Choice [y/N]: " DECLARATIVE_CHOICE
+if [[ "$DECLARATIVE_CHOICE" =~ ^[Yy]$ ]]; then
+    DECLARATIVE_MODE="yes"
+else
+    DECLARATIVE_MODE="no"
+fi
+echo ""
 read -rp "  Press ENTER to continue..."
 echo ""
 
@@ -318,246 +329,6 @@ cat /mnt/etc/fstab
 echo ""
 
 # =============================================================================
-# VPK declarative package manifest
-# =============================================================================
-info "============================================================"
-info " WRITING VPK PACKAGE MANIFEST"
-info "============================================================"
-
-mkdir -p /mnt/etc/visnux /mnt/var/lib/vpk /mnt/usr/bin
-
-cat > /mnt/usr/bin/vpk <<'VPK_EOF'
-#!/bin/bash
-# =============================================================================
-# vpk — Visnux Declarative Package Sync Tool
-# usage: vpk [--check | --sync | --path /path/to/manifest]
-# =============================================================================
-
-set -euo pipefail
-
-MANIFEST="/etc/visnux/packages.decl"
-ACTION="sync"
-STATE_FILE="/var/lib/vpk/state"
-
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
-
-if [[ "$(id -u)" -ne 0 ]]; then
-    exec sudo "$0" "$@"
-fi
-
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        -c|--check) ACTION="check"; shift ;;
-        -s|--sync)  ACTION="sync"; shift ;;
-        -p|--path)
-            [[ $# -ge 2 ]] || { echo -e "${RED}[FAIL]${NC} --path requires a manifest path."; exit 1; }
-            MANIFEST="$2"
-            shift 2
-            ;;
-        -h|--help)
-            echo "Usage: vpk [--check | --sync | --path /path/to/manifest]"
-            exit 0
-            ;;
-        *)
-            echo -e "${RED}[FAIL]${NC} Unknown option: $1"
-            exit 1
-            ;;
-    esac
-done
-
-if [[ ! -f "$MANIFEST" ]]; then
-    echo -e "${RED}[FAIL]${NC} Manifest '$MANIFEST' not found!"
-    exit 1
-fi
-
-echo -e "${CYAN}[VPK]${NC} Reading manifest: $MANIFEST"
-
-# Parse every "pkgs = { ... }" block. Package names are comma-separated.
-# Comments and whitespace are ignored, so the manifest can be formatted
-# however you like as long as package names stay inside a pkgs = { ... } block.
-parse_manifest() {
-    awk '
-        BEGIN { in_block=0 }
-        {
-            line=$0
-            sub(/#.*/, "", line)
-
-            if (!in_block && line ~ /^[[:space:]]*pkgs[[:space:]]*=[[:space:]]*\{/) {
-                in_block=1
-                sub(/^.*\{/, "", line)
-            }
-
-            if (in_block) {
-                if (line ~ /\}/) {
-                    sub(/\}.*/, "", line)
-                    in_block=0
-                }
-
-                n=split(line, parts, ",")
-                for (i=1; i<=n; i++) {
-                    gsub(/^[[:space:]]+|[[:space:]]+$/, "", parts[i])
-                    if (parts[i] != "")
-                        print parts[i]
-                }
-            }
-        }
-    ' "$MANIFEST" | sort -u
-}
-
-mapfile -t DECLARED_ARRAY < <(parse_manifest)
-
-if [[ ${#DECLARED_ARRAY[@]} -eq 0 ]]; then
-    echo -e "${YELLOW}[WARN]${NC} No packages extracted from $MANIFEST"
-    exit 0
-fi
-
-echo -e "${GREEN}[INFO]${NC} ${#DECLARED_ARRAY[@]} declared packages parsed."
-
-mkdir -p "$(dirname "$STATE_FILE")"
-
-# The state file contains ONLY packages previously managed by vpk.
-# This is what makes removals safe: vpk does not remove arbitrary packages
-# that happen to be installed outside of the declarative manifest.
-mapfile -t PREVIOUS_ARRAY < <(
-    if [[ -f "$STATE_FILE" ]]; then
-        sed '/^[[:space:]]*#/d;/^[[:space:]]*$/d' "$STATE_FILE" | sort -u
-    fi
-)
-
-MISSING=()
-for pkg in "${DECLARED_ARRAY[@]}"; do
-    if ! pacman -Q "$pkg" &>/dev/null; then
-        MISSING+=("$pkg")
-    fi
-done
-
-REMOVED=()
-if [[ ${#PREVIOUS_ARRAY[@]} -gt 0 ]]; then
-    for pkg in "${PREVIOUS_ARRAY[@]}"; do
-        if ! printf '%s\n' "${DECLARED_ARRAY[@]}" | grep -qFx "$pkg"; then
-            if pacman -Q "$pkg" &>/dev/null; then
-                REMOVED+=("$pkg")
-            fi
-        fi
-    done
-fi
-
-echo -e "${GREEN}[INFO]${NC} Desired state: ${#DECLARED_ARRAY[@]} package(s)."
-
-if [[ ${#MISSING[@]} -gt 0 ]]; then
-    echo -e "${YELLOW}[ADD]${NC} ${#MISSING[@]} declared package(s) missing from system:"
-    printf '  + %s\n' "${MISSING[@]}"
-fi
-
-if [[ ${#REMOVED[@]} -gt 0 ]]; then
-    echo -e "${YELLOW}[REMOVE]${NC} ${#REMOVED[@]} package(s) no longer declared:"
-    printf '  - %s\n' "${REMOVED[@]}"
-fi
-
-if [[ ${#MISSING[@]} -eq 0 && ${#REMOVED[@]} -eq 0 ]]; then
-    echo -e "${GREEN}[OK]${NC} System matches manifest state cleanly."
-    cp <(printf '%s\n' "${DECLARED_ARRAY[@]}") "$STATE_FILE"
-    exit 0
-fi
-
-if [[ "$ACTION" == "check" ]]; then
-    echo -e "${YELLOW}[CHECK]${NC} Declarative state differs from the manifest."
-    exit 1
-fi
-
-if [[ ${#MISSING[@]} -gt 0 ]]; then
-    echo -e "${CYAN}[SYNC]${NC} Installing declared packages..."
-    pacman -S --needed --noconfirm "${MISSING[@]}"
-fi
-
-if [[ ${#REMOVED[@]} -gt 0 ]]; then
-    echo -e "${CYAN}[SYNC]${NC} Removing packages no longer declared..."
-    pacman -Rns --noconfirm "${REMOVED[@]}"
-fi
-
-# Only write the new state after every pacman operation succeeded.
-printf '%s\n' "${DECLARED_ARRAY[@]}" > "$STATE_FILE"
-
-echo -e "${GREEN}[OK]${NC} Sync complete!"
-
-VPK_EOF
-chmod +x /mnt/usr/bin/vpk
-
-# The installer still performs imperative configuration (services, GRUB
-# installation/configuration, files, symlinks, users, swap, branding, etc.).
-# VPK owns only packages listed in this manifest.
-csv() {
-    local value="$*"
-    value="${value// /, }"
-    printf '%s' "$value"
-}
-
-VPK_BOOT_PKGS="grub"
-if [ "$BOOT_MODE" = "uefi" ]; then
-    VPK_BOOT_PKGS="$VPK_BOOT_PKGS efibootmgr"
-fi
-
-VPK_DRIVER_PKGS="mesa lib32-mesa vulkan-intel lib32-vulkan-intel vulkan-radeon lib32-vulkan-radeon \
-vulkan-nouveau lib32-vulkan-nouveau vulkan-swrast lib32-vulkan-swrast libva intel-media-driver"
-
-if [ "$INIT_SYSTEM" = "systemd" ]; then
-    VPK_INIT_PKGS="networkmanager"
-else
-    VPK_INIT_PKGS="networkmanager-${INIT_SYSTEM} dbus-${INIT_SYSTEM} turnstile turnstile-${INIT_SYSTEM}"
-fi
-
-if [ "$DESKTOP_ENV" = "none" ]; then
-    VPK_DESKTOP_PKGS=""
-elif [ "$INIT_SYSTEM" = "systemd" ] && [ "$DESKTOP_ENV" = "kde" ]; then
-    VPK_DESKTOP_PKGS="plasma ark konsole dolphin xdg-desktop-portal-kde wl-clipboard kitty fastfetch sddm power-profiles-daemon"
-elif [ "$INIT_SYSTEM" = "systemd" ] && [ "$DESKTOP_ENV" = "xfce" ]; then
-    VPK_DESKTOP_PKGS="xfce4 xfce4-whiskermenu-plugin ark xclip maim xfce4-pulseaudio-plugin kitty fastfetch sddm power-profiles-daemon"
-elif [ "$DESKTOP_ENV" = "kde" ]; then
-    VPK_DESKTOP_PKGS="plasma konsole dolphin kitty ark xdg-desktop-portal-kde fastfetch wl-clipboard \
-sddm-${INIT_SYSTEM} power-profiles-daemon-${INIT_SYSTEM} pipewire pipewire-${INIT_SYSTEM} \
-pipewire-pulse pipewire-pulse-${INIT_SYSTEM} wireplumber wireplumber-${INIT_SYSTEM}"
-else
-    VPK_DESKTOP_PKGS="xorg-server xfce4 xfce4-whiskermenu-plugin xfce4-pulseaudio-plugin \
-kitty ark fastfetch sddm-${INIT_SYSTEM} xclip maim power-profiles-daemon-${INIT_SYSTEM} \
-pipewire pipewire-${INIT_SYSTEM} pipewire-pulse pipewire-pulse-${INIT_SYSTEM} \
-wireplumber wireplumber-${INIT_SYSTEM}"
-fi
-
-cat > /mnt/etc/visnux/packages.decl <<EOF
-# /etc/visnux/packages.decl
-#
-# VPK owns packages listed in this file.
-# Service enabling, GRUB installation, symlinks, configuration files, users,
-# swap, branding, and other system changes remain in the installer.
-
-[kernel]
-pkgs = { linux, linux-headers, linux-firmware, sof-firmware }
-
-[bootmgr]
-pkgs = { $(csv "$VPK_BOOT_PKGS") }
-
-[desktop]
-pkgs = { $(csv "$VPK_DESKTOP_PKGS") }
-
-[fonts]
-pkgs = { ttf-iosevka-nerd, ttf-adwaitamono-nerd }
-
-[cli-tools]
-pkgs = { neovim, nano, sudo, fish, flatpak }
-
-[network]
-pkgs = { $(csv "$VPK_INIT_PKGS") }
-
-[drivers]
-pkgs = { $(csv "$VPK_DRIVER_PKGS") }
-
-[extra]
-pkgs = { git, papirus-icon-theme }
-EOF
-
-info "VPK manifest written to /mnt/etc/visnux/packages.decl"
-
-# =============================================================================
 # In-chroot script
 # =============================================================================
 info "============================================================"
@@ -577,12 +348,16 @@ INIT_SYSTEM="${INIT_SYSTEM}"
 DESKTOP_ENV="${DESKTOP_ENV}"
 NEW_HOSTNAME="${NEW_HOSTNAME}"
 GRUB_DISK="${GRUB_DISK}"
+DECLARATIVE_MODE="${DECLARATIVE_MODE}"
 
 hwclock --systohc
 
-pacman -Sy
-vpk --sync
-
+if [ "\${DECLARATIVE_MODE}" != "yes" ]; then
+    pacman -Sy --noconfirm git
+    pacman -S --noconfirm ttf-iosevka-nerd ttf-adwaitamono-nerd
+    pacman -S --noconfirm fish flatpak
+    pacman -S --noconfirm papirus-icon-theme
+fi
 mkdir -p /usr/share/icons/hicolor/scalable/apps/
 mkdir -p /usr/share/pixmaps/
 
@@ -619,32 +394,776 @@ echo "LANG=en_US.UTF-8" > /etc/locale.conf
 # Desktop / system packages
 # =============================================================================
 
+if [ "\${DECLARATIVE_MODE}" = "yes" ]; then
+    info "Declarative installation selected. Generating /etc/visnux/visnux.conf..."
+
+    mkdir -p /etc/visnux /var/lib/vpk
+    DESKTOP_METAPKGS=""
+    DESKTOP_PKGS=""
+    SERVICE_PKGS="networkmanager"
+    ENABLED_SERVICES="NetworkManager"
+
+    if [ "\${DESKTOP_ENV}" = "kde" ]; then
+        DESKTOP_METAPKGS="plasma"
+        DESKTOP_PKGS="ark konsole dolphin xdg-desktop-portal-kde wl-clipboard"
+    elif [ "\${DESKTOP_ENV}" = "xfce" ]; then
+        DESKTOP_METAPKGS="xfce4"
+        DESKTOP_PKGS="xfce4-whiskermenu-plugin ark xclip maim xfce4-pulseaudio-plugin"
+    else
+        info "Skipping Desktop Environment installation."
+    fi
+
+    if [ "\${DESKTOP_ENV}" != "none" ]; then
+        SERVICE_PKGS="\${SERVICE_PKGS} sddm power-profiles-daemon"
+        ENABLED_SERVICES="\${ENABLED_SERVICES} sddm power-profiles-daemon"
+    fi
+
+    cat > /etc/visnux/visnux.conf <<EOF
+# =============================================================================
+# Visnux Declarative Configuration
+# =============================================================================
+
+[kernel]
+pkgs = { linux, linux-headers, linux-firmware, sof-firmware }
+
+[bootmgr]
+pkgs = { grub, efibootmgr }
+
+[desktop]
+metapkgs = { \${DESKTOP_METAPKGS} }
+pkgs = { \${DESKTOP_PKGS} }
+
+[fonts]
+pkgs = { ttf-iosevka-nerd, ttf-adwaitamono-nerd }
+
+[packages]
+pkgs = { git, papirus-icon-theme, neovim, nano, sudo, fish, flatpak, fastfetch, kitty }
+
+[services]
+pkgs = { \${SERVICE_PKGS} }
+enabled = { \${ENABLED_SERVICES} }
+
+[drivers]
+pkgs = { mesa, lib32-mesa, vulkan-intel, lib32-vulkan-intel, vulkan-radeon, lib32-vulkan-radeon, vulkan-nouveau, lib32-vulkan-nouveau, vulkan-swrast, lib32-vulkan-swrast, libva, intel-media-driver }
+
+# =============================================================================
+# Users
+# =============================================================================
+# A user is added automatically only if you choose to create one.
+#
+# Template:
+# [user:alice]
+# groups = { wheel, audio, video, input }
+# shell = /usr/bin/fish
+#
+# [user-services]
+# alice = { pipewire, wireplumber, pipewire-pulse }
+
+
+# do NOT change the lines below this comment
+init = \${INIT_SYSTEM}
+EOF
+
+    cat > /usr/bin/vpk <<'VPK_EOF'
+#!/bin/bash
+# =============================================================================
+# vpk — Visnux Declarative Package Sync Tool
+# usage: vpk [sync | check] [--path /path/to/manifest]
+# =============================================================================
+
+set -euo pipefail
+
+MANIFEST="/etc/visnux/visnux.conf"
+ACTION="sync"
+STATE_DIR="/var/lib/vpk"
+PACKAGE_STATE="\$STATE_DIR/packages.state"
+SERVICE_STATE="\$STATE_DIR/services.state"
+USER_STATE="\$STATE_DIR/users.state"
+USER_SERVICE_STATE="\$STATE_DIR/user-services.state"
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+
+if [[ "\$(id -u)" -ne 0 ]]; then
+    if command -v sudo >/dev/null 2>&1; then
+        exec sudo "\$0" "\$@"
+    fi
+    echo -e "\${RED}[FAIL]\${NC} vpk must run as root."
+    exit 1
+fi
+
+while [[ \$# -gt 0 ]]; do
+    case "\$1" in
+        sync) ACTION="sync"; shift ;;
+        check|-c|--check) ACTION="check"; shift ;;
+        --path|-p)
+            [[ \$# -ge 2 ]] || { echo -e "\${RED}[FAIL]\${NC} --path requires a manifest path."; exit 1; }
+            MANIFEST="\$2"
+            shift 2
+            ;;
+        -h|--help)
+            echo "Usage: vpk [sync|check] [--path /path/to/manifest]"
+            echo "  sync   Reconcile the manifest and run pacman -Syu first (default)."
+            echo "  check  Check declarative state without changing anything."
+            exit 0
+            ;;
+        --sync|-s)
+            echo -e "\${RED}[FAIL]\${NC} --sync is no longer a VPK command. Use: vpk sync"
+            exit 1
+            ;;
+        *) echo -e "\${RED}[FAIL]\${NC} Unknown option: \$1"; exit 1 ;;
+    esac
+done
+
+[[ -f "\$MANIFEST" ]] || { echo -e "\${RED}[FAIL]\${NC} Manifest '\$MANIFEST' not found!"; exit 1; }
+
+mkdir -p "\$STATE_DIR"
+
+echo -e "\${CYAN}[VPK]\${NC} Reading manifest: \$MANIFEST"
+
+if [[ "\$ACTION" == "sync" ]]; then
+    echo -e "\${CYAN}[UPGRADE]\${NC} Running pacman -Syu..."
+    pacman -Syu --noconfirm
+fi
+
+INIT="systemd"
+declare -a DECLARED_PKGS=()
+declare -a META_PKGS=()
+declare -a SERVICE_PKGS=()
+declare -a ENABLED_SERVICES=()
+declare -A USERS=()
+declare -A USER_GROUPS=()
+declare -A USER_SHELLS=()
+declare -A USER_SERVICES=()
+
+trim() {
+    local x="\$1"
+    x="\${x#"\${x%%[![:space:]]*}"}"
+    x="\${x%"\${x##*[![:space:]]}"}"
+    printf '%s' "\$x"
+}
+
+parse_list() {
+    local body="\$1" item
+    body="\${body//,/ }"
+    read -ra _items <<< "\$body"
+    for item in "\${_items[@]}"; do
+        item="\$(trim "\$item")"
+        [[ -n "\$item" ]] && printf '%s\n' "\$item"
+    done
+}
+
+SECTION=""
+CURRENT_USER=""
+
+while IFS= read -r line || [[ -n "\$line" ]]; do
+    line="\${line%%#*}"
+    line="\$(trim "\$line")"
+    [[ -z "\$line" ]] && continue
+
+    if [[ "\$line" =~ ^\[user:([^]]+)\]\$ ]]; then
+        CURRENT_USER="\${BASH_REMATCH[1]}"
+        SECTION="user"
+        USERS["\$CURRENT_USER"]=1
+        continue
+    fi
+
+    if [[ "\$line" =~ ^\[([^]]+)\]\$ ]]; then
+        SECTION="\${BASH_REMATCH[1]}"
+        CURRENT_USER=""
+        continue
+    fi
+
+    if [[ "\$line" =~ ^init[[:space:]]*=[[:space:]]*([a-zA-Z0-9_-]+)\$ ]]; then
+        INIT="\${BASH_REMATCH[1]}"
+        continue
+    fi
+
+    if [[ "\$SECTION" == "user" && -n "\$CURRENT_USER" ]]; then
+        if [[ "\$line" =~ ^groups[[:space:]]*=[[:space:]]*\{(.*)\}\$ ]]; then
+            USER_GROUPS["\$CURRENT_USER"]="\${BASH_REMATCH[1]}"
+            continue
+        fi
+        if [[ "\$line" =~ ^shell[[:space:]]*=[[:space:]]*(.*)\$ ]]; then
+            USER_SHELLS["\$CURRENT_USER"]="\$(trim "\${BASH_REMATCH[1]}")"
+            continue
+        fi
+    fi
+
+    if [[ "\$SECTION" == "user-services" && "\$line" =~ ^([^=]+)=[[:space:]]*\{(.*)\}\$ ]]; then
+        user="\$(trim "\${BASH_REMATCH[1]}")"
+        USER_SERVICES["\$user"]="\${BASH_REMATCH[2]}"
+        continue
+    fi
+
+    if [[ "\$line" =~ ^metapkgs[[:space:]]*=[[:space:]]*\{(.*)\}\$ ]]; then
+        [[ "\$SECTION" == "desktop" ]] || { echo -e "\${RED}[FAIL]\${NC} metapkgs is only valid in [desktop]."; exit 1; }
+        while IFS= read -r pkg; do [[ -n "\$pkg" ]] && META_PKGS+=("\$pkg"); done < <(parse_list "\${BASH_REMATCH[1]}")
+        continue
+    fi
+
+    if [[ "\$line" =~ ^pkgs[[:space:]]*=[[:space:]]*\{(.*)\}\$ ]]; then
+        while IFS= read -r pkg; do
+            [[ -z "\$pkg" ]] && continue
+            if [[ "\$SECTION" == "services" ]]; then SERVICE_PKGS+=("\$pkg"); else DECLARED_PKGS+=("\$pkg"); fi
+        done < <(parse_list "\${BASH_REMATCH[1]}")
+        continue
+    fi
+
+    if [[ "\$SECTION" == "services" && "\$line" =~ ^enabled[[:space:]]*=[[:space:]]*\{(.*)\}\$ ]]; then
+        while IFS= read -r service; do
+            [[ -n "\$service" ]] && ENABLED_SERVICES+=("\$service")
+        done < <(parse_list "\${BASH_REMATCH[1]}")
+    fi
+done < "\$MANIFEST"
+
+case "\$INIT" in
+    systemd|openrc|runit|dinit) ;;
+    *) echo -e "\${RED}[FAIL]\${NC} Invalid init '\$INIT'."; exit 1 ;;
+esac
+
+# =============================================================================
+# Package reconciliation
+# =============================================================================
+# A manifest target can be either a real package or a pacman package group.
+# Groups such as xfce4/plasma are NOT entries in pacman's installed-package
+# database, so pacman -Qq "\$target" is not a valid group-presence test.
+
+is_package() {
+    pacman -Qq "\$1" &>/dev/null
+}
+is_group() {
+    pacman -Sg "\$1" &>/dev/null
+}
+group_members() {
+    pacman -Sg "\$1" | awk '{print \$2}' | sort -u
+}
+declare -A desired_target_kind=()
+declare -A desired_group_members=()
+declare -A desired_install_pkg=()
+declare -a invalid_targets=()
+
+add_package_target() {
+    local target="\$1"
+    [[ -n "\$target" ]] || return
+    if is_package "\$target" || pacman -Si "\$target" &>/dev/null; then
+        desired_target_kind["\$target"]="package"
+        desired_install_pkg["\$target"]=1
+    else
+        invalid_targets+=("\$target")
+    fi
+}
+add_meta_target() {
+    local target="\$1"
+    [[ -n "\$target" ]] || return
+    if ! is_group "\$target"; then invalid_targets+=("\$target"); return; fi
+    desired_target_kind["\$target"]="group"
+    desired_group_members["\$target"]="\$(group_members "\$target")"
+    while IFS= read -r member; do [[ -n "\$member" ]] && desired_install_pkg["\$member"]=1; done <<< "\${desired_group_members[\$target]}"
+}
+for pkg in "\${DECLARED_PKGS[@]}"; do add_package_target "\$pkg"; done
+for meta in "\${META_PKGS[@]}"; do add_meta_target "\$meta"; done
+for pkg in "\${SERVICE_PKGS[@]}"; do
+    if [[ "\$INIT" == "systemd" ]]; then add_package_target "\$pkg"; else add_package_target "\$pkg-\$INIT"; fi
+done
+
+if [[ \${#invalid_targets[@]} -gt 0 ]]; then
+    echo -e "\${RED}[FAIL]\${NC} Unknown package/group target(s):"
+    printf '  ! %s\n' "\${invalid_targets[@]}"
+    exit 1
+fi
+
+# Previous state format:
+#   package|name
+#   group|name|member1 member2 ...
+# Older VPK states containing only a package name are accepted as package targets.
+declare -a PREVIOUS_TARGETS=()
+if [[ -f "\$PACKAGE_STATE" ]]; then
+    while IFS= read -r line; do
+        [[ -n "\$line" ]] && PREVIOUS_TARGETS+=("\$line")
+    done < "\$PACKAGE_STATE"
+fi
+
+MISSING_TARGETS=()
+MISSING_PACKAGES=()
+REMOVED_TARGETS=()
+REMOVED_PACKAGES=()
+
+declare -A missing_pkg=()
+for target in "\${!desired_target_kind[@]}"; do
+    kind="\${desired_target_kind[\$target]}"
+    if [[ "\$kind" == "group" ]]; then
+        missing=0
+        while IFS= read -r member; do
+            [[ -n "\$member" ]] || continue
+            if ! is_package "\$member"; then
+                missing=1
+                missing_pkg["\$member"]=1
+            fi
+        done <<< "\${desired_group_members[\$target]}"
+        (( missing )) && MISSING_TARGETS+=("\$target")
+    else
+        if ! is_package "\$target"; then
+            MISSING_TARGETS+=("\$target")
+            missing_pkg["\$target"]=1
+        fi
+    fi
+done
+
+for pkg in "\${!missing_pkg[@]}"; do
+    MISSING_PACKAGES+=("\$pkg")
+done
+
+# Compare the current manifest against VPK's LAST SUCCESSFUL target state.
+# This is what lets VPK safely remove a group such as xfce4 when it disappears
+# from the manifest without touching unrelated packages.
+for entry in "\${PREVIOUS_TARGETS[@]}"; do
+    [[ -n "\$entry" ]] || continue
+
+    kind="package"
+    target="\$entry"
+    members=""
+    IFS='|' read -r first second third <<< "\$entry"
+    if [[ "\$first" == "package" || "\$first" == "group" ]]; then
+        kind="\$first"
+        target="\$second"
+        members="\$third"
+    fi
+
+    if [[ -z "\${desired_target_kind[\$target]+x}" ]]; then
+        REMOVED_TARGETS+=("\$target")
+        if [[ "\$kind" == "group" ]]; then
+            while IFS= read -r member; do
+                [[ -n "\$member" ]] || continue
+                if is_package "\$member"; then
+                    REMOVED_PACKAGES+=("\$member")
+                fi
+            done < <(tr ' ' '\n' <<< "\$members")
+        elif is_package "\$target"; then
+            REMOVED_PACKAGES+=("\$target")
+        fi
+    elif [[ "\$kind" == "group" && "\${desired_target_kind[\$target]}" == "group" ]]; then
+        # If a repository changes group membership, remove old members that no
+        # longer belong to the declared group.
+        current_members="\${desired_group_members[\$target]}"
+        while IFS= read -r member; do
+            [[ -n "\$member" ]] || continue
+            if ! grep -qxF "\$member" <<< "\$current_members" && is_package "\$member"; then
+                REMOVED_PACKAGES+=("\$member")
+            fi
+        done < <(tr ' ' '\n' <<< "\$members")
+    fi
+done
+
+# Deduplicate removal list.
+declare -A unique_removed=()
+DEDUP_REMOVED_PACKAGES=()
+for pkg in "\${REMOVED_PACKAGES[@]}"; do
+    [[ -n "\$pkg" ]] || continue
+    if [[ -z "\${unique_removed[\$pkg]+x}" ]]; then
+        unique_removed["\$pkg"]=1
+        DEDUP_REMOVED_PACKAGES+=("\$pkg")
+    fi
+done
+REMOVED_PACKAGES=("\${DEDUP_REMOVED_PACKAGES[@]}")
+
+if [[ \${#MISSING_TARGETS[@]} -gt 0 ]]; then
+    echo -e "\${YELLOW}[ADD]\${NC} \${#MISSING_TARGETS[@]} declared target(s) need installation:"
+    printf '  + %s\n' "\${MISSING_TARGETS[@]}"
+fi
+if [[ \${#REMOVED_TARGETS[@]} -gt 0 ]]; then
+    echo -e "\${YELLOW}[REMOVE]\${NC} \${#REMOVED_TARGETS[@]} declared target(s) removed from manifest:"
+    printf '  - %s\n' "\${REMOVED_TARGETS[@]}"
+fi
+
+if [[ "\$ACTION" == "check" ]]; then
+    if [[ \${#MISSING_TARGETS[@]} -gt 0 || \${#REMOVED_TARGETS[@]} -gt 0 ]]; then
+        echo -e "\${YELLOW}[CHECK]\${NC} Declarative package state differs from the manifest."
+        exit 1
+    fi
+fi
+
+if [[ "\$ACTION" == "sync" ]]; then
+    if [[ \${#MISSING_PACKAGES[@]} -gt 0 ]]; then
+        echo -e "\${CYAN}[SYNC]\${NC} Installing declared package/group members..."
+        pacman -S --needed --noconfirm "\${MISSING_PACKAGES[@]}"
+    fi
+
+    if [[ \${#REMOVED_PACKAGES[@]} -gt 0 ]]; then
+        echo -e "\${CYAN}[SYNC]\${NC} Removing packages no longer declared..."
+        pacman -Rns --noconfirm "\${REMOVED_PACKAGES[@]}"
+    fi
+
+    # Record the declarative targets only after all package operations succeed.
+    : > "\$PACKAGE_STATE"
+    for target in "\${!desired_target_kind[@]}"; do
+        if [[ "\${desired_target_kind[\$target]}" == "group" ]]; then
+            members="\${desired_group_members[\$target]}"
+            compact_members="\$(tr '\n' ' ' <<< "\$members" | sed 's/[[:space:]]*\$//')"
+            printf 'group|%s|%s\n' "\$target" "\$compact_members" >> "\$PACKAGE_STATE"
+        else
+            printf 'package|%s\n' "\$target" >> "\$PACKAGE_STATE"
+        fi
+    done
+    sort -o "\$PACKAGE_STATE" "\$PACKAGE_STATE"
+fi
+
+# =============================================================================
+# User reconciliation
+# =============================================================================
+
+declare -A desired_user=()
+declare -A desired_groups=()
+declare -A desired_shell=()
+for user in "\${!USERS[@]}"; do
+    desired_user["\$user"]=1
+    desired_groups["\$user"]="\${USER_GROUPS[\$user]-}"
+    desired_shell["\$user"]="\${USER_SHELLS[\$user]-/usr/bin/bash}"
+done
+
+mapfile -t PREVIOUS_USERS < <(cat "\$USER_STATE" 2>/dev/null | sort -u || true)
+USER_ADDED=()
+USER_REMOVED=()
+USER_CHANGED=()
+
+user_is_converged() {
+    local user="\$1"
+    local wanted_shell="\${desired_shell[\$user]}"
+    local current_shell
+    current_shell="\$(getent passwd "\$user" | cut -d: -f7)"
+    [[ "\$current_shell" == "\$wanted_shell" ]] || return 1
+
+    local wanted_groups actual_groups
+    wanted_groups="\$(parse_list "\${desired_groups[\$user]}")"
+    actual_groups="\$(id -nG "\$user" | tr ' ' '\n' | grep -vx "\$(id -gn "\$user")" | sort || true)"
+    wanted_groups="\$(printf '%s\n' "\$wanted_groups" | sed '/^[[:space:]]*\$/d' | sort)"
+    [[ "\$actual_groups" == "\$wanted_groups" ]]
+}
+
+for user in "\${!desired_user[@]}"; do
+    if ! id "\$user" &>/dev/null; then
+        USER_ADDED+=("\$user")
+    elif ! user_is_converged "\$user"; then
+        USER_CHANGED+=("\$user")
+    fi
+done
+for user in "\${PREVIOUS_USERS[@]}"; do
+    [[ -n "\$user" ]] || continue
+    if [[ -z "\${desired_user[\$user]+x}" ]] && id "\$user" &>/dev/null; then
+        USER_REMOVED+=("\$user")
+    fi
+done
+
+# Validate user-service references before changing anything.
+for user in "\${!USER_SERVICES[@]}"; do
+    if [[ -z "\${desired_user[\$user]+x}" ]]; then
+        echo -e "\${RED}[FAIL]\${NC} User-services section references undeclared user '\$user'."
+        exit 1
+    fi
+done
+
+if [[ "\$ACTION" == "check" ]]; then
+    if [[ \${#MISSING_TARGETS[@]} -gt 0 || \${#REMOVED_TARGETS[@]} -gt 0 || \${#USER_ADDED[@]} -gt 0 || \${#USER_REMOVED[@]} -gt 0 || \${#USER_CHANGED[@]} -gt 0 ]]; then
+        echo -e "\${YELLOW}[CHECK]\${NC} Declarative state differs from the manifest."
+        exit 1
+    fi
+    echo -e "\${GREEN}[OK]\${NC} Package and user state is present."
+    exit 0
+fi
+
+# Users are declarative too. VPK never deletes a home directory when a user is
+# removed from the manifest; userdel is intentionally used without -r.
+for user in "\${USER_ADDED[@]}"; do
+    shell="\${desired_shell[\$user]}"
+    groups="\${desired_groups[\$user]}"
+    [[ -x "\$shell" ]] || { echo -e "\${RED}[FAIL]\${NC} Shell '\$shell' for '\$user' does not exist."; exit 1; }
+    args=(-m -s "\$shell")
+    if [[ -n "\$groups" ]]; then
+        mapfile -t gs < <(parse_list "\$groups")
+        args+=( -G "\$(IFS=,; echo "\${gs[*]}")" )
+    fi
+    echo -e "\${CYAN}[USER]\${NC} Creating \$user"
+    useradd "\${args[@]}" "\$user"
+done
+
+for user in "\${USER_CHANGED[@]}"; do
+    shell="\${desired_shell[\$user]}"
+    groups="\${desired_groups[\$user]}"
+    [[ -x "\$shell" ]] || { echo -e "\${RED}[FAIL]\${NC} Shell '\$shell' for '\$user' does not exist."; exit 1; }
+    usermod -s "\$shell" "\$user"
+    if [[ -n "\$groups" ]]; then
+        mapfile -t gs < <(parse_list "\$groups")
+        usermod -G "\$(IFS=,; echo "\${gs[*]}")" "\$user"
+    else
+        usermod -G '' "\$user"
+    fi
+done
+
+# User removals happen after user-service reconciliation so VPK can clean the
+# user's declarative service links before deleting the account.
+
+# =============================================================================
+# System service enablement
+# =============================================================================
+# This only changes boot-time enablement. It intentionally does NOT start the
+# service now.
+# =============================================================================
+
+service_enable() {
+    local service="\$1"
+    case "\$INIT" in
+        systemd)
+            systemctl enable "\$service"
+            ;;
+        openrc)
+            rc-update add "\$service" default
+            ;;
+        runit)
+            mkdir -p /etc/runit/runsvdir/default
+            [[ -d "/etc/runit/sv/\$service" ]] || return 0
+            ln -sfn "/etc/runit/sv/\$service" "/etc/runit/runsvdir/default/\$service"
+            ;;
+        dinit)
+            mkdir -p /etc/dinit.d/boot.d
+            [[ -e "/etc/dinit.d/\$service" ]] || return 0
+            ln -sfn "../\$service" "/etc/dinit.d/boot.d/\$service"
+            ;;
+    esac
+}
+
+service_disable() {
+    local service="\$1"
+    case "\$INIT" in
+        systemd) systemctl disable "\$service" || true ;;
+        openrc) rc-update del "\$service" default || true ;;
+        runit) rm -f "/etc/runit/runsvdir/default/\$service" ;;
+        dinit) rm -f "/etc/dinit.d/boot.d/\$service" ;;
+    esac
+}
+
+declare -A wanted_services=()
+for service in "\${ENABLED_SERVICES[@]}"; do wanted_services["\$service"]=1; done
+
+mapfile -t OLD_SERVICES < <(cat "\$SERVICE_STATE" 2>/dev/null | sort -u || true)
+declare -A old_services=()
+for service in "\${OLD_SERVICES[@]}"; do [[ -n "\$service" ]] && old_services["\$service"]=1; done
+
+service_is_enabled() {
+    local service="\$1"
+    case "\$INIT" in
+        systemd)
+            systemctl is-enabled --quiet "\$service" 2>/dev/null
+            ;;
+        openrc)
+            rc-update show default 2>/dev/null | grep -Eq "(^|[[:space:]])\${service}([[:space:]]|\$)"
+            ;;
+        runit)
+            [[ -L "/etc/runit/runsvdir/default/\$service" ]]
+            ;;
+        dinit)
+            [[ -L "/etc/dinit.d/boot.d/\$service" ]]
+            ;;
+    esac
+}
+
+for service in "\${!wanted_services[@]}"; do
+    if [[ -z "\${old_services[\$service]+x}" ]] || ! service_is_enabled "\$service"; then
+        echo -e "\${CYAN}[ENABLE]\${NC} \$service"
+        service_enable "\$service"
+    fi
+done
+for service in "\${!old_services[@]}"; do
+    if [[ -z "\${wanted_services[\$service]+x}" ]]; then
+        echo -e "\${CYAN}[DISABLE]\${NC} \$service"
+        service_disable "\$service"
+    fi
+done
+
+# =============================================================================
+# User service enablement
+# =============================================================================
+# User services are never started by VPK. The configuration is prepared so the
+# user's service manager will enable them on the next session/boot.
+# =============================================================================
+
+user_service_enable() {
+    local user="\$1" service="\$2"
+    local home uid
+    home="\$(getent passwd "\$user" | cut -d: -f6)"
+    uid="\$(id -u "\$user")"
+
+    case "\$INIT" in
+        systemd)
+            mkdir -p "\$home/.config/systemd/user/default.target.wants"
+            if [[ -e "/usr/lib/systemd/user/\$service.service" ]]; then
+                ln -sfn "/usr/lib/systemd/user/\$service.service" \
+                    "\$home/.config/systemd/user/default.target.wants/\$service.service"
+            else
+                echo -e "\${YELLOW}[WARN]\${NC} systemd user unit '\$service.service' not found for \$user."
+            fi
+            chown -R "\$user:\$user" "\$home/.config/systemd"
+            ;;
+        openrc)
+            mkdir -p "\$home/.config/rc/runlevels/default"
+            if [[ -e "/etc/user/init.d/\$service" ]]; then
+                ln -sfn "/etc/user/init.d/\$service" "\$home/.config/rc/runlevels/default/\$service"
+            else
+                echo -e "\${YELLOW}[WARN]\${NC} OpenRC user service '\$service' not found for \$user."
+            fi
+            chown -R "\$user:\$user" "\$home/.config/rc"
+            ;;
+        runit)
+            mkdir -p "\$home/.local/service"
+            if [[ -d "/etc/runit/sv/\$service" ]]; then
+                ln -sfn "/etc/runit/sv/\$service" "\$home/.local/service/\$service"
+            else
+                echo -e "\${YELLOW}[WARN]\${NC} runit service '\$service' not found for \$user."
+            fi
+            chown -R "\$user:\$user" "\$home/.local"
+            ;;
+        dinit)
+            # dinit user services cannot be enabled from the installation
+            # chroot with --offline: there is no boot service hierarchy for the
+            # user's dinit session yet. Try the normal user manager only when
+            # it is actually available. A failed enable is intentionally NOT
+            # considered reconciled, so the next post-boot vpk sync retries.
+            if command -v dinitctl >/dev/null 2>&1; then
+                if ! runuser -u "\$user" -- env HOME="\$home" dinitctl --user enable "\$service"; then
+                    echo -e "\${YELLOW}[WARN]\${NC} dinit user service '\$service' for '\$user' could not be enabled yet."
+                    echo -e "\${YELLOW}[WARN]\${NC} This is expected during installation; run 'vpk --sync' after first boot."
+                    return 1
+                fi
+            else
+                echo -e "\${YELLOW}[WARN]\${NC} dinitctl not found; cannot enable user service '\$service'."
+                return 1
+            fi
+            ;;
+    esac
+}
+
+user_service_disable() {
+    local user="\$1" service="\$2"
+    local home
+    home="\$(getent passwd "\$user" 2>/dev/null | cut -d: -f6 || true)"
+    [[ -n "\$home" ]] || return 0
+
+    case "\$INIT" in
+        systemd) rm -f "\$home/.config/systemd/user/default.target.wants/\$service.service" ;;
+        openrc) rm -f "\$home/.config/rc/runlevels/default/\$service" ;;
+        runit) rm -f "\$home/.local/service/\$service" ;;
+        dinit)
+            if command -v dinitctl >/dev/null 2>&1; then
+                runuser -u "\$user" -- env HOME="\$home" dinitctl --user --offline disable "\$service" || true
+            fi
+            ;;
+    esac
+}
+
+mapfile -t OLD_USER_SERVICES < <(cat "\$USER_SERVICE_STATE" 2>/dev/null || true)
+declare -A wanted_user_services=()
+declare -A old_user_services=()
+
+for user in "\${!USER_SERVICES[@]}"; do
+    while IFS= read -r service; do
+        [[ -n "\$service" ]] || continue
+        wanted_user_services["\$user|\$service"]=1
+    done < <(parse_list "\${USER_SERVICES[\$user]}")
+done
+for entry in "\${OLD_USER_SERVICES[@]}"; do
+    [[ -n "\$entry" ]] && old_user_services["\$entry"]=1
+done
+
+declare -A reconciled_user_services=()
+for entry in "\${!wanted_user_services[@]}"; do
+    user="\${entry%%|*}"
+    service="\${entry#*|}"
+
+    if [[ -n "\${old_user_services[\$entry]+x}" ]]; then
+        reconciled_user_services["\$entry"]=1
+        continue
+    fi
+
+    echo -e "\${CYAN}[USER ENABLE]\${NC} \$service for \$user"
+    if user_service_enable "\$user" "\$service"; then
+        reconciled_user_services["\$entry"]=1
+    fi
+done
+for entry in "\${!old_user_services[@]}"; do
+    if [[ -z "\${wanted_user_services[\$entry]+x}" ]]; then
+        user="\${entry%%|*}"
+        service="\${entry#*|}"
+        if id "\$user" &>/dev/null; then
+            echo -e "\${CYAN}[USER DISABLE]\${NC} \$service for \$user"
+            user_service_disable "\$user" "\$service"
+        fi
+    fi
+done
+
+for user in "\${USER_REMOVED[@]}"; do
+    echo -e "\${CYAN}[USER]\${NC} Removing account \$user (home directory is preserved)"
+    userdel "\$user"
+done
+
+# =============================================================================
+# Save state only after successful reconciliation.
+# =============================================================================
+# Package state was already written above, immediately after successful package
+# reconciliation. Do not overwrite it here with the old package-list format.
+printf '%s\n' "\${!wanted_services[@]}" | sort > "\$SERVICE_STATE"
+printf '%s\n' "\${!desired_user[@]}" | sort > "\$USER_STATE"
+printf '%s\n' "\${!reconciled_user_services[@]}" | sort > "\$USER_SERVICE_STATE"
+
+echo -e "\${GREEN}[OK]\${NC} VPK reconciliation complete."
+
+VPK_EOF
+    chmod +x /usr/bin/vpk
+    info "Synchronizing declarative package state..."
+    vpk sync
+else
+# =============================================================================
+
 if [ "\${INIT_SYSTEM}" = "systemd" ]; then
 
     if [ "\${DESKTOP_ENV}" = "kde" ]; then
+        pacman -S plasma ark konsole dolphin xdg-desktop-portal-kde wl-clipboard kitty fastfetch sddm networkmanager neovim nano sudo power-profiles-daemon --noconfirm
         systemctl enable NetworkManager
         systemctl enable sddm --force
+        pacman -Rnsdd plasma-bigscreen --noconfirm
 
     elif [ "\${DESKTOP_ENV}" = "xfce" ]; then
+        pacman -S xfce4 xfce4-whiskermenu-plugin ark xclip maim xfce4-pulseaudio-plugin kitty fastfetch sddm networkmanager neovim nano sudo power-profiles-daemon --noconfirm
         systemctl enable NetworkManager
         systemctl enable sddm --force
 
     else
         info "Skipping Desktop Environment installation."
+        pacman -S networkmanager neovim nano sudo --noconfirm
         systemctl enable NetworkManager
     fi
 
 else
 
     if [ "\${DESKTOP_ENV}" = "kde" ]; then
-        info "KDE package set is declared in /etc/visnux/packages.decl."
+        DE_PKGS="plasma konsole dolphin"
+        DESKTOP_PKGS="kitty ark xdg-desktop-portal-kde fastfetch wl-clipboard sddm sddm-\${INIT_SYSTEM} power-profiles-daemon power-profiles-daemon-\${INIT_SYSTEM} pipewire pipewire-\${INIT_SYSTEM} pipewire-pulse pipewire-pulse-\${INIT_SYSTEM} wireplumber wireplumber-\${INIT_SYSTEM}"
 
     elif [ "\${DESKTOP_ENV}" = "xfce" ]; then
-        info "Xfce package set is declared in /etc/visnux/packages.decl."
+        DE_PKGS="xorg-server xfce4 xfce4-whiskermenu-plugin xfce4-pulseaudio-plugin"
+        DESKTOP_PKGS="kitty ark fastfetch sddm xclip maim sddm-\${INIT_SYSTEM} power-profiles-daemon power-profiles-daemon-\${INIT_SYSTEM} pipewire pipewire-\${INIT_SYSTEM} pipewire-pulse pipewire-pulse-\${INIT_SYSTEM} wireplumber wireplumber-\${INIT_SYSTEM}"
 
     else
+        DE_PKGS=""
+        DESKTOP_PKGS=""
         info "Skipping Desktop Environment installation."
     fi
+
+    pacman -S \
+        \${DE_PKGS} \
+        \${DESKTOP_PKGS} \
+        turnstile turnstile-\${INIT_SYSTEM} \
+        networkmanager networkmanager-\${INIT_SYSTEM} \
+        dbus dbus-\${INIT_SYSTEM} \
+        neovim nano sudo \
+        --noconfirm
 
     case "\${INIT_SYSTEM}" in
         openrc)
@@ -687,24 +1206,47 @@ else
 
 fi
 
+
+fi
 # =============================================================================
 # DRIVERS
 # =============================================================================
 
-info "GPU driver packages are declared in /etc/visnux/packages.decl."
+if [ "\${DECLARATIVE_MODE}" = "yes" ]; then
+    info "Drivers are declaratively managed by VPK."
+else
+# =============================================================================
 
+info "Installing mesa drivers for intel, amd and nouveau..."
+sudo pacman -S mesa lib32-mesa \
+  vulkan-intel lib32-vulkan-intel \
+  vulkan-radeon lib32-vulkan-radeon \
+  vulkan-nouveau lib32-vulkan-nouveau \
+  vulkan-swrast lib32-vulkan-swrast \
+  libva intel-media-driver --noconfirm --needed
+
+
+fi
 # =============================================================================
 # GRUB
 # =============================================================================
 
 info "Installing GRUB..."
-
-if [ "\${BOOT_MODE}" = "uefi" ]; then
-    grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=visnux
+if [ "\${DECLARATIVE_MODE}" = "yes" ]; then
+    if [ "\${BOOT_MODE}" = "UEFI" ]; then
+        grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB --recheck
+    else
+        grub-install --recheck "\${GRUB_DISK}"
+    fi
 else
-    grub-install --recheck "\${GRUB_DISK}"
+    if [ "\${BOOT_MODE}" = "UEFI" ]; then
+        pacman -S --noconfirm grub efibootmgr
+        grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB --recheck
+    else
+        pacman -S --noconfirm grub
+        grub-install --recheck "\${GRUB_DISK}"
+    fi
 fi
-
 sed -i 's/GRUB_DISTRIBUTOR="Arch"/GRUB_DISTRIBUTOR="Visnux"/' /etc/default/grub
 sed -i 's/GRUB_DISTRIBUTOR="Artix"/GRUB_DISTRIBUTOR="Visnux"/' /etc/default/grub
 
@@ -781,6 +1323,18 @@ if [[ "\${CREATE_USER}" =~ ^[Yy]$ ]]; then
     su - "\${NEW_USER}" -c "cd ~ && mkdir -p ~/.config && git clone https://github.com/beamyyl/maindots && cp -r maindots/* ~/.config/ && rm -rf maindots && [ ! -f ~/.config/fastfetch/config.jsonc ] || sed -i 's/\"top\": 2/\"top\": 1/' ~/.config/fastfetch/config.jsonc"
     info "Dotfiles installed successfully."
     info "User setup complete."
+
+    if [ "\${DECLARATIVE_MODE}" = "yes" ]; then
+        cat >> /etc/visnux/visnux.conf <<EOF
+
+[user:\${NEW_USER}]
+groups = { wheel, audio, video, input }
+shell = /usr/bin/fish
+EOF
+        info "Added '\${NEW_USER}' to /etc/visnux/visnux.conf."
+        info "VPK now owns the declarative state of this user."
+        vpk sync
+    fi
 
 elif [[ "\${CREATE_USER}" =~ ^[Nn]$ ]]; then
     info "Skipping user creation."
