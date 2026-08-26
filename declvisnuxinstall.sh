@@ -580,8 +580,7 @@ GRUB_DISK="${GRUB_DISK}"
 
 hwclock --systohc
 
-# VPK handles package installation. Everything below this point that is not
-# a package operation remains imperative on purpose.
+pacman -Sy
 vpk --sync
 
 mkdir -p /usr/share/icons/hicolor/scalable/apps/
