@@ -418,7 +418,7 @@ if [ "\${DECLARATIVE_MODE}" = "yes" ]; then
     fi
 
     if [ "\${DESKTOP_ENV}" != "none" ]; then
-        SERVICE_PKGS="\${SERVICE_PKGS} sddm power-profiles-daemon"
+        SERVICE_PKGS="\${SERVICE_PKGS} sddm power-profiles-daemon pipewire wireplumber pipewire-pulse"
         ENABLED_SERVICES="\${ENABLED_SERVICES} sddm power-profiles-daemon"
     fi
 
