@@ -1,0 +1,16 @@
+# /etc/visnux/packages.decl
+
+[kernel]
+pkgs = { linux, linux-headers, linux-firmware, sof-firmware }
+
+[bootmgr]
+pkgs = { grub, efibootmgr }
+
+[desktop]
+pkgs = { plasma, konsole, dolphin, sddm }
+
+[fonts]
+pkgs = { ttf-iosevka-nerd, ttf-adwaitamono-nerd }
+
+[cli-tools]
+pkgs = { neovim, nano, sudo, fish, flatpak, fastfetch, kitty }
