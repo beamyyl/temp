@@ -419,9 +419,7 @@ if [ "\${DECLARATIVE_MODE}" = "yes" ]; then
     fi
 
     cat > /etc/visnux/visnux.conf <<EOF
-# =============================================================================
-# Visnux Configuration
-# =============================================================================
+# Visnux's configuration file
 
 [kernel]
 pkgs = { linux, linux-headers, linux-firmware, sof-firmware }
@@ -446,16 +444,14 @@ enabled = { \${ENABLED_SERVICES} }
 [drivers]
 pkgs = { mesa, lib32-mesa, vulkan-intel, lib32-vulkan-intel, vulkan-radeon, lib32-vulkan-radeon, vulkan-nouveau, lib32-vulkan-nouveau, vulkan-swrast, lib32-vulkan-swrast, libva, intel-media-driver }
 
-# Users
+# User example
 # [user:beamy]
 # groups = { wheel, audio, video, input }
 # shell = /usr/bin/fish
-#
 # [user-services]
-# alice = { pipewire, wireplumber, pipewire-pulse }
+# beamy = { pipewire, wireplumber, pipewire-pulse }
 
-
-# Do NOT change the lines below this comment
+# Do NOT change the init line. If you wanna switch inits, clean reinstall is the safest way to do so.
 init = \${INIT_SYSTEM}
 EOF
 
@@ -981,13 +977,12 @@ user_service_enable() {
             ;;
         dinit)
             if command -v dinitctl >/dev/null 2>&1; then
-                if ! runuser -u "\$user" -- env HOME="\$home" dinitctl --user enable "\$service"; then
-                    echo -e "\${YELLOW}[WARN]\${NC} dinit user service '\$service' for '\$user' could not be enabled yet."
-                    echo -e "\${YELLOW}[WARN]\${NC} This is expected during installation; run 'vpk --sync' after first boot."
+                if ! su "$user" -c "dinitctl enable -u '$service'"; then
+                    echo -e "${YELLOW}[WARN]${NC} dinit user service '$service' for '$user' could not be enabled yet."
                     return 1
                 fi
             else
-                echo -e "\${YELLOW}[WARN]\${NC} dinitctl not found; cannot enable user service '\$service'."
+                echo -e "${YELLOW}[WARN]${NC} dinitctl not found; cannot enable user service '$service'."
                 return 1
             fi
             ;;
