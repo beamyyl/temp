@@ -420,7 +420,7 @@ if [ "\${DECLARATIVE_MODE}" = "yes" ]; then
 
     cat > /etc/visnux/visnux.conf <<EOF
 # =============================================================================
-# Visnux Declarative Configuration
+# Visnux Configuration
 # =============================================================================
 
 [kernel]
@@ -446,13 +446,8 @@ enabled = { \${ENABLED_SERVICES} }
 [drivers]
 pkgs = { mesa, lib32-mesa, vulkan-intel, lib32-vulkan-intel, vulkan-radeon, lib32-vulkan-radeon, vulkan-nouveau, lib32-vulkan-nouveau, vulkan-swrast, lib32-vulkan-swrast, libva, intel-media-driver }
 
-# =============================================================================
 # Users
-# =============================================================================
-# A user is added automatically only if you choose to create one.
-#
-# Template:
-# [user:alice]
+# [user:beamy]
 # groups = { wheel, audio, video, input }
 # shell = /usr/bin/fish
 #
@@ -460,7 +455,7 @@ pkgs = { mesa, lib32-mesa, vulkan-intel, lib32-vulkan-intel, vulkan-radeon, lib3
 # alice = { pipewire, wireplumber, pipewire-pulse }
 
 
-# do NOT change the lines below this comment
+# Do NOT change the lines below this comment
 init = \${INIT_SYSTEM}
 EOF
 
@@ -621,13 +616,6 @@ case "\$INIT" in
     *) echo -e "\${RED}[FAIL]\${NC} Invalid init '\$INIT'."; exit 1 ;;
 esac
 
-# =============================================================================
-# Package reconciliation
-# =============================================================================
-# A manifest target can be either a real package or a pacman package group.
-# Groups such as xfce4/plasma are NOT entries in pacman's installed-package
-# database, so pacman -Qq "\$target" is not a valid group-presence test.
-
 is_package() {
     pacman -Qq "\$1" &>/dev/null
 }
@@ -672,10 +660,6 @@ if [[ \${#invalid_targets[@]} -gt 0 ]]; then
     exit 1
 fi
 
-# Previous state format:
-#   package|name
-#   group|name|member1 member2 ...
-# Older VPK states containing only a package name are accepted as package targets.
 declare -a PREVIOUS_TARGETS=()
 if [[ -f "\$PACKAGE_STATE" ]]; then
     while IFS= read -r line; do
@@ -713,9 +697,6 @@ for pkg in "\${!missing_pkg[@]}"; do
     MISSING_PACKAGES+=("\$pkg")
 done
 
-# Compare the current manifest against VPK's LAST SUCCESSFUL target state.
-# This is what lets VPK safely remove a group such as xfce4 when it disappears
-# from the manifest without touching unrelated packages.
 for entry in "\${PREVIOUS_TARGETS[@]}"; do
     [[ -n "\$entry" ]] || continue
 
@@ -742,8 +723,6 @@ for entry in "\${PREVIOUS_TARGETS[@]}"; do
             REMOVED_PACKAGES+=("\$target")
         fi
     elif [[ "\$kind" == "group" && "\${desired_target_kind[\$target]}" == "group" ]]; then
-        # If a repository changes group membership, remove old members that no
-        # longer belong to the declared group.
         current_members="\${desired_group_members[\$target]}"
         while IFS= read -r member; do
             [[ -n "\$member" ]] || continue
@@ -754,7 +733,6 @@ for entry in "\${PREVIOUS_TARGETS[@]}"; do
     fi
 done
 
-# Deduplicate removal list.
 declare -A unique_removed=()
 DEDUP_REMOVED_PACKAGES=()
 for pkg in "\${REMOVED_PACKAGES[@]}"; do
@@ -793,7 +771,6 @@ if [[ "\$ACTION" == "sync" ]]; then
         pacman -Rns --noconfirm "\${REMOVED_PACKAGES[@]}"
     fi
 
-    # Record the declarative targets only after all package operations succeed.
     : > "\$PACKAGE_STATE"
     for target in "\${!desired_target_kind[@]}"; do
         if [[ "\${desired_target_kind[\$target]}" == "group" ]]; then
@@ -806,10 +783,6 @@ if [[ "\$ACTION" == "sync" ]]; then
     done
     sort -o "\$PACKAGE_STATE" "\$PACKAGE_STATE"
 fi
-
-# =============================================================================
-# User reconciliation
-# =============================================================================
 
 declare -A desired_user=()
 declare -A desired_groups=()
@@ -870,8 +843,7 @@ if [[ "\$ACTION" == "check" ]]; then
     exit 0
 fi
 
-# Users are declarative too. VPK never deletes a home directory when a user is
-# removed from the manifest; userdel is intentionally used without -r.
+# Users are declarative too. VPK never deletes a home directory when a user is removed from the manifest; userdel is intentionally used without -r.
 for user in "\${USER_ADDED[@]}"; do
     shell="\${desired_shell[\$user]}"
     groups="\${desired_groups[\$user]}"
@@ -898,15 +870,7 @@ for user in "\${USER_CHANGED[@]}"; do
     fi
 done
 
-# User removals happen after user-service reconciliation so VPK can clean the
-# user's declarative service links before deleting the account.
-
-# =============================================================================
-# System service enablement
-# =============================================================================
-# This only changes boot-time enablement. It intentionally does NOT start the
-# service now.
-# =============================================================================
+# System services
 
 service_enable() {
     local service="\$1"
@@ -978,12 +942,7 @@ for service in "\${!old_services[@]}"; do
     fi
 done
 
-# =============================================================================
-# User service enablement
-# =============================================================================
-# User services are never started by VPK. The configuration is prepared so the
-# user's service manager will enable them on the next session/boot.
-# =============================================================================
+# User services
 
 user_service_enable() {
     local user="\$1" service="\$2"
@@ -1021,11 +980,6 @@ user_service_enable() {
             chown -R "\$user:\$user" "\$home/.local"
             ;;
         dinit)
-            # dinit user services cannot be enabled from the installation
-            # chroot with --offline: there is no boot service hierarchy for the
-            # user's dinit session yet. Try the normal user manager only when
-            # it is actually available. A failed enable is intentionally NOT
-            # considered reconciled, so the next post-boot vpk sync retries.
             if command -v dinitctl >/dev/null 2>&1; then
                 if ! runuser -u "\$user" -- env HOME="\$home" dinitctl --user enable "\$service"; then
                     echo -e "\${YELLOW}[WARN]\${NC} dinit user service '\$service' for '\$user' could not be enabled yet."
@@ -1103,11 +1057,7 @@ for user in "\${USER_REMOVED[@]}"; do
     userdel "\$user"
 done
 
-# =============================================================================
-# Save state only after successful reconciliation.
-# =============================================================================
-# Package state was already written above, immediately after successful package
-# reconciliation. Do not overwrite it here with the old package-list format.
+# Save state only after successful sync
 printf '%s\n' "\${!wanted_services[@]}" | sort > "\$SERVICE_STATE"
 printf '%s\n' "\${!desired_user[@]}" | sort > "\$USER_STATE"
 printf '%s\n' "\${!reconciled_user_services[@]}" | sort > "\$USER_SERVICE_STATE"
@@ -1213,9 +1163,8 @@ fi
 # =============================================================================
 
 if [ "\${DECLARATIVE_MODE}" = "yes" ]; then
-    info "Drivers are declaratively managed by VPK."
+    info "Drivers are managed by VPK."
 else
-# =============================================================================
 
 info "Installing mesa drivers for intel, amd and nouveau..."
 sudo pacman -S mesa lib32-mesa \
@@ -1234,14 +1183,14 @@ fi
 info "Installing GRUB..."
 if [ "\${DECLARATIVE_MODE}" = "yes" ]; then
     if [ "\${BOOT_MODE}" = "UEFI" ]; then
-        grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB --recheck
+        grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=Visnux --recheck
     else
         grub-install --recheck "\${GRUB_DISK}"
     fi
 else
     if [ "\${BOOT_MODE}" = "UEFI" ]; then
         pacman -S --noconfirm grub efibootmgr
-        grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB --recheck
+        grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=Visnux --recheck
     else
         pacman -S --noconfirm grub
         grub-install --recheck "\${GRUB_DISK}"
