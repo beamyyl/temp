@@ -403,7 +403,7 @@ if [ "\${DECLARATIVE_MODE}" = "yes" ]; then
     SERVICE_PKGS="networkmanager"
     ENABLED_SERVICES="NetworkManager"
     if [ "\${INIT_SYSTEM}" != "systemd" ]; then
-        SERVICE_PKGS="\${SERVICE_PKGS} turnstile-\${INIT_SYSTEM}"
+        SERVICE_PKGS="\${SERVICE_PKGS} turnstile"
         ENABLED_SERVICES="\${ENABLED_SERVICES} turnstiled"
     fi
 
