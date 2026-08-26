@@ -981,12 +981,12 @@ user_service_enable() {
             ;;
         dinit)
             if command -v dinitctl >/dev/null 2>&1; then
-                if ! su "$user" -c "dinitctl enable -u '$service'"; then
-                    echo -e "${YELLOW}[WARN]${NC} dinit user service '$service' for '$user' could not be enabled yet."
+                if ! su "\$user" -c "dinitctl enable -u '\$service'"; then
+                    echo -e "\${YELLOW}[WARN]\${NC} dinit user service '\$service' for '\$user' could not be enabled yet."
                     return 1
                 fi
             else
-                echo -e "${YELLOW}[WARN]${NC} dinitctl not found; cannot enable user service '$service'."
+                echo -e "\${YELLOW}[WARN]\${NC} dinitctl not found; cannot enable user service '\$service'."
                 return 1
             fi
             ;;
