@@ -289,11 +289,6 @@ EOF
     pacman -Sy --noconfirm archlinux-keyring
 
     cat > /etc/pacman.d/mirrorlist <<'EOF'
-##
-## Artix Linux repository mirrorlist
-## Generated on 2026-07-13 by artix-mlg
-##
-
 # Artix mirrors
 # Use rankmirrors(1) to get a list of the fastest mirrors for your location,
 # e.g.: rankmirrors -v -n 5 /etc/pacman.d/mirrorlist
