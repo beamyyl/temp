@@ -542,8 +542,9 @@ if [[ -n "\$EFI_DIR" && -n "\$BOOT_DISK" ]] || [[ -z "\$EFI_DIR" && -z "\$BOOT_D
     exit 1
 fi
 
+BOOTLOADER_NAME="\${BOOTMGR_PKGS[0]}"
 CURRENT_BOOTMGR_STATE=""
-BOOTMGR_PKGS_SORTED="\$(printf '%s\n' "\${BOOTMGR_PKGS[@]}" | sort)"
+BOOTMGR_PKGS_SORTED="\$(printf '%s\n' "\${BOOTMGR_PKGS[@]}" | sort)
 if [[ -n "\$EFI_DIR" ]]; then
     CURRENT_BOOTMGR_STATE="pkgs=\$BOOTMGR_PKGS_SORTED|efi_dir=\$EFI_DIR"
 else
@@ -562,10 +563,10 @@ fi
 
 install_grub() {
     if [[ -n "\$EFI_DIR" ]]; then
-        echo -e "\${CYAN}[GRUB]\${NC} Installing GRUB for UEFI..."
+        echo -e "\${CYAN}[BMGR]\${NC} Installing GRUB for UEFI..."
         grub-install --efi-directory="\$EFI_DIR"
     elif [[ -n "\$BOOT_DISK" ]]; then
-        echo -e "\${CYAN}[GRUB]\${NC} Installing GRUB for BIOS..."
+        echo -e "\${CYAN}[BMGR]\${NC} Installing GRUB for BIOS..."
         grub-install --recheck "\$BOOT_DISK"
     else
         echo -e "\${RED}[FAIL]\${NC} GRUB requires either efi_dir or boot_disk."
@@ -789,10 +790,10 @@ if [[ "\$ACTION" == "sync" ]]; then
     sort -o "\$PACKAGE_STATE" "\$PACKAGE_STATE"
 
     if [[ "\$BOOTMGR_CHANGED" -eq 1 || "\$REINSTALL_BOOTLOADER" -eq 1 ]]; then
-        if [[ "\$BOOTMGR_CHANGED" -eq 1 ]]; then
-            echo -e "\${CYAN}[GRUB]\${NC} [bootmgr] changed — reinstalling bootloader"
+        if [[ -z "\$PREVIOUS_BOOTMGR_STATE" ]]; then
+            echo -e "\${CYAN}[BMGR]\${NC} Installing \"\$BOOTLOADER_NAME\""
         else
-            echo -e "\${CYAN}[GRUB]\${NC} Reinstalling bootloader on request"
+            echo -e "\${CYAN}[BMGR]\${NC} Reinstalling \"\$BOOTLOADER_NAME\""
         fi
         install_grub
         BOOTLOADER_REINSTALLED=1
@@ -805,7 +806,7 @@ if [[ "\$ACTION" == "sync" ]]; then
     [[ -f "\$KERNEL_STATE" ]] && PREVIOUS_KERNEL_SORTED="\$(sort "\$KERNEL_STATE")"
     if [[ "\$CURRENT_KERNEL_SORTED" != "\$PREVIOUS_KERNEL_SORTED" && "\$BOOTLOADER_REINSTALLED" -eq 0 ]]; then
         if command -v grub-mkconfig &>/dev/null && [[ -d /boot/grub ]]; then
-            echo -e "\${CYAN}[GRUB]\${NC} [kernel] changed — regenerating grub.cfg"
+            echo -e "\${CYAN}[BMGR]\${NC} kernel changed, regenerating BMGR config..."
             grub-mkconfig -o /boot/grub/grub.cfg
         fi
     fi
