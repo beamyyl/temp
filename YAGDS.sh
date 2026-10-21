@@ -113,7 +113,6 @@ pkgs = { net-misc/networkmanager sys-process/cronie }
 enabled = { NetworkManager cronie }
 
 [make.conf]
-# Special directive, consumed by apk and not copied to make.conf:
 enable-binpkgs = false
 COMMON_FLAGS="-O2 -pipe"
 CFLAGS="${COMMON_FLAGS}"
@@ -194,16 +193,13 @@ priority = 9998
 sync-uri = https://distfiles.gentoo.org/releases/amd64/binpackages/23.0/x86-64
 location = /var/cache/binhost/gentoo
 BINREPOS
-# Initial binary config follows manifest directive; apk manages this file later.
 
-# Locale setup.
 grep -qE "^${LOCALE//./\.} UTF-8$" /etc/locale.gen || echo "$LOCALE UTF-8" >> /etc/locale.gen
 locale-gen || true
 LOCALE_NUM=$(eselect locale list | grep -F "$LOCALE" | head -n1 | awk -F'[][]' '{print $2}' || true)
 [[ -z $LOCALE_NUM ]] || eselect locale set "$LOCALE_NUM"
 env-update && source /etc/profile || true
 
-# Essential system packages. Declarative reconciliation installs the rest.
 emerge -q --ask=n sys-kernel/installkernel sys-boot/grub app-admin/sudo app-portage/gentoolkit net-misc/networkmanager app-admin/syslog-ng sys-process/cronie
 if [[ $INIT_SYSTEM == openrc ]]; then
   rc-update add NetworkManager default || true; rc-update add syslog-ng default || true; rc-update add cronie default || true
@@ -225,7 +221,7 @@ grub-mkconfig -o /boot/grub/grub.cfg
 mkdir -p /etc/gentoo /var/lib/apk
 cat > /usr/bin/apk <<'APK'
 #!/usr/bin/env bash
-# apk — Gentoo declarative package reconciler (not Alpine's apk).
+# apk — Gentoo declarative package reconciler
 set -Eeuo pipefail
 MANIFEST=/etc/gentoo/gentoo.conf; ACTION=sync; DO_UPGRADE=0
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
