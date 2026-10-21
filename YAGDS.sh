@@ -3,6 +3,7 @@
 # YAGDS — Yet Another Gentoo Declarative System
 # Gentoo counterpart to YADAIS. Installer: UEFI/BIOS; OpenRC/systemd/dinit.
 # Runtime manager: apk sync | apk sync --upgrade | apk check
+# Yes, this is vibecoded from the unreleased YADAS script.
 # =============================================================================
 set -Eeuo pipefail
 
