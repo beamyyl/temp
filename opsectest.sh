@@ -178,7 +178,7 @@ pkgs = { }
 [sudo]
 # wheel = allowed
 # wheel = allowed no_sudo_password
-# If you wish to use doas / others, comment the whole sudo section, remove it from [packages] and add it to blacklist. The doas package is 'opendoas' and the doas configuration *must be edited manually*. For other sudo configurations, use 'visudo'.
+# If you wish to use doas / others, comment/delete the whole sudo section, remove it from [packages] and add it to blacklist. The doas package is 'opendoas' and the doas configuration *must be edited manually*. For other sudo configurations, use 'visudo'.
 
 [hostname]
 hostname = daras
