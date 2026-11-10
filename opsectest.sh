@@ -146,13 +146,16 @@ else
 [system]
 pkgs = { $SYSTEM_PKGS }
 init = dinit
+# Do NOT change the init line. If you wish to change the init-system, reinstall.
 
 [bootmgr]
 pkgs = { $BOOTMGR_PKGS }
+# Keep these as-is, I still haven't implemented support for other bootmgrs.
 
 [desktop]
 metapkgs = { }
 pkgs = { }
+# Inside of 'metapkgs', you should add a desktop environment (ex: plasma). 'pkgs' is mostly for apps like 'dolphin konsole...', but you can still add anything you'd like!
 
 [packages]
 pkgs = { sudo neovim }
@@ -164,6 +167,7 @@ pkgs = { ttf-iosevka-nerd ttf-adwaitamono-nerd }
 [services]
 # pkgs = { $SERVICE_PKGS pipewire wireplumber pipewire-pulse }
 pkgs = { $SERVICE_PKGS }
+# The 'turnstile' package in the enabled section differs from openrc to dinit. On openrc, the service is 'turnstile'. On dinit, the service is 'turnstiled'.
 enabled = { $ENABLED_SERVICES }
 
 [drivers]
@@ -174,6 +178,7 @@ pkgs = { }
 [sudo]
 # wheel = allowed
 # wheel = allowed no_sudo_password
+# If you wish to use doas / others, comment the whole sudo section, remove it from [packages] and add it to blacklist. The doas package is 'opendoas' and the doas configuration *must be edited manually*. For other sudo configurations, use 'visudo'.
 
 [hostname]
 hostname = daras
@@ -183,13 +188,13 @@ hostname = daras
 
 # [1cmd]
 # sh = "your-command-here"
+# This lets you run a set of commands during installation. For example, you can make 'sh = "passwd beamy"', and many more, like setting up /etc/doas.conf automatically.
 
 # [user:beamy]
 # groups = { wheel audio video input }
 # shell = /bin/bash
 # [user-services]
 # beamy = { pipewire wireplumber pipewire-pulse }
-
 EOF
 
     info "Opening $MANIFEST_SOURCE in $EDITOR_CHOICE. Save and quit when you're done."
@@ -198,16 +203,16 @@ EOF
 fi
 
 INIT_SYSTEM="$(awk '/^\[system\]/{f=1; next} /^\[/{f=0} f && /^[[:space:]]*init[[:space:]]*=/ {sub(/^[^=]*=[[:space:]]*/, ""); print; exit}' "$MANIFEST_SOURCE")"
-
 case "$INIT_SYSTEM" in
-    openrc|dinit) ;;
+    openrc|dinit)
+        ;;
+    "")
+        die "Missing init setting in [system]. Add 'init = openrc' or 'init = dinit' to the manifest."
+        ;;
     *)
-        die "Invalid or missing init in [system]: '$INIT_SYSTEM'. Choose 'openrc' or 'dinit'."
+        die "Invalid init system '$INIT_SYSTEM' in [system]. Use 'openrc' or 'dinit'."
         ;;
 esac
-
-info "Selected init from manifest: $INIT_SYSTEM"
-
 SYSTEM_PKGS="$(awk '/^\[system\]/{f=1; next} /^\[/{f=0} f' "$MANIFEST_SOURCE" | grep -m1 'pkgs' | sed -E 's/.*\{(.*)\}.*/\1/' | xargs)"
 
 if [ -z "$SYSTEM_PKGS" ]; then
@@ -324,7 +329,6 @@ USER_STATE="\$STATE_DIR/users.state"
 USER_SERVICE_STATE="\$STATE_DIR/user-services.state"
 KERNEL_STATE="\$STATE_DIR/kernel.state"
 BLACKLIST_STATE="\$STATE_DIR/blacklist.state"
-INIT_STATE="\$STATE_DIR/init.state"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 
@@ -365,12 +369,21 @@ while [[ \$# -gt 0 ]]; do
 done
 
 PACMAN_ASK_ARGS=()
+
 if [[ "\$ALWAYS_YES" -eq 1 ]]; then
     PACMAN_ASK_ARGS+=(--ask=4)
 fi
+
 [[ -f "\$MANIFEST" ]] || { echo -e "\${RED}[FAIL]\${NC} Manifest '\$MANIFEST' not found!"; exit 1; }
+
 mkdir -p "\$STATE_DIR"
+
 echo -e "\${CYAN}[APK]\${NC} Reading manifest: \$MANIFEST"
+
+if [[ "\$ACTION" == "sync" ]]; then
+    echo -e "\${CYAN}[UPGRADE]\${NC} Running pacman -Syu..."
+    pacman -Syu --noconfirm "\${PACMAN_ASK_ARGS[@]}"
+fi
 
 declare -a DECLARED_PKGS=()
 declare -a META_PKGS=()
@@ -506,12 +519,8 @@ if [[ "\$CURRENT_BLACKLIST_SORTED" != "\$PREVIOUS_BLACKLIST_SORTED" ]]; then
 fi
 case "\$INIT" in
     openrc|dinit) ;;
-    *)
-        echo -e "\${RED}[FAIL]\${NC} Invalid init '\$INIT'. Choose 'openrc' or 'dinit'."
-        exit 1
-        ;;
+    *) echo -e "\${RED}[FAIL]\${NC} Invalid init '\$INIT'."; exit 1 ;;
 esac
-DECLARED_PKGS+=("\$INIT" "elogind-\$INIT")
 if [[ "\$BLACKLIST_CHANGED" -eq 1 ]]; then
     for bpkg in "\${BLACKLIST_PKGS[@]}"; do
         for ppkg in "\${PACKAGES_SECTION_PKGS[@]}"; do
@@ -572,11 +581,6 @@ if [[ \${#invalid_targets[@]} -gt 0 ]]; then
     exit 1
 fi
 
-if [[ "\$ACTION" == "sync" ]]; then
-    echo -e "\${CYAN}[UPGRADE]\${NC} Updating system packages..."
-    pacman -Syu --noconfirm "\${PACMAN_ASK_ARGS[@]}"
-fi
-
 declare -a PREVIOUS_TARGETS=()
 if [[ -f "\$PACKAGE_STATE" ]]; then
     while IFS= read -r line; do
@@ -588,25 +592,6 @@ MISSING_TARGETS=()
 MISSING_PACKAGES=()
 REMOVED_TARGETS=()
 REMOVED_PACKAGES=()
-PREVIOUS_INIT=""
-
-if [[ -f "\$INIT_STATE" ]]; then
-    read -r PREVIOUS_INIT < "\$INIT_STATE"
-else
-    if [[ "\$INIT" == "openrc" ]] && pacman -Qq dinit &>/dev/null; then
-        PREVIOUS_INIT="dinit"
-    elif [[ "\$INIT" == "dinit" ]] && pacman -Qq openrc &>/dev/null; then
-        PREVIOUS_INIT="openrc"
-    fi
-fi
-if [[ -n "\$PREVIOUS_INIT" && "\$PREVIOUS_INIT" != "\$INIT" ]]; then
-    echo -e "\${CYAN}[INIT]\${NC} Switching from \$PREVIOUS_INIT to \$INIT."
-    for old_init_pkg in "\$PREVIOUS_INIT" "elogind-\$PREVIOUS_INIT"; do
-        if pacman -Qq "\$old_init_pkg" &>/dev/null; then
-            REMOVED_PACKAGES+=("\$old_init_pkg")
-        fi
-    done
-fi
 
 declare -A missing_pkg=()
 for target in "\${!desired_target_kind[@]}"; do
@@ -725,82 +710,27 @@ if [[ "\$ACTION" == "check" ]]; then
 fi
 
 if [[ "\$ACTION" == "sync" ]]; then
-    if [[ -n "\$PREVIOUS_INIT" && "\$PREVIOUS_INIT" != "\$INIT" ]]; then
-        echo -e "\${CYAN}[INIT]\${NC} Cleaning up services from \$PREVIOUS_INIT..."
-        if [[ "\$PREVIOUS_INIT" == "openrc" ]] && ! command -v rc-update >/dev/null 2>&1; then
-            echo -e "\${RED}[FAIL]\${NC} rc-update is unavailable; cannot clean up old OpenRC services."
-            exit 1
-        fi
-        if [[ -f "\$SERVICE_STATE" ]]; then
-            while IFS= read -r service; do
-                [[ -n "\$service" ]] || continue
-
-                case "\$PREVIOUS_INIT" in
-                    openrc)
-                        rc-update del "\$service" default || true
-                        ;;
-                    dinit)
-                        rm -f "/etc/dinit.d/boot.d/\$service"
-                        ;;
-                esac
-            done < "\$SERVICE_STATE"
-        fi
-        if [[ -f "\$USER_SERVICE_STATE" ]]; then
-            while IFS='|' read -r user service; do
-                [[ -n "\$user" && -n "\$service" ]] || continue
-
-                home="\$(getent passwd "\$user" 2>/dev/null | cut -d: -f6 || true)"
-                [[ -n "\$home" ]] || continue
-
-                case "\$PREVIOUS_INIT" in
-                    openrc)
-                        rm -f "\$home/.config/rc/runlevels/default/\$service"
-                        ;;
-                    dinit)
-                        rm -f "\$home/.config/dinit.d/boot.d/\$service"
-                        ;;
-                esac
-            done < "\$USER_SERVICE_STATE"
-        fi
-        : > "\$SERVICE_STATE"
-        : > "\$USER_SERVICE_STATE"
-        echo -e "\${GREEN}[INIT]\${NC} Previous init service registrations cleaned up."
-    fi
-
     if [[ \${#MISSING_PACKAGES[@]} -gt 0 ]]; then
         echo -e "\${CYAN}[SYNC]\${NC} Installing declared package/group members..."
         pacman -S --needed --noconfirm "\${PACMAN_ASK_ARGS[@]}" "\${MISSING_PACKAGES[@]}"
     fi
-    case "\$INIT" in
-        dinit)
-            if [[ ! -s /usr/bin/dinit || ! -x /usr/bin/dinit ]]; then
-                echo -e "\${YELLOW}[WARN]\${NC} Dinit executable is missing or invalid. Reinstalling dinit-base..."
-                pacman -S --noconfirm dinit-base
-            fi
 
-            [[ -s /usr/bin/dinit && -x /usr/bin/dinit ]] || {
-                echo -e "\${RED}[FAIL]\${NC} Dinit executable verification failed."
-                exit 1
-            }
-            ;;
-        openrc)
-            [[ -s /usr/bin/openrc-init && -x /usr/bin/openrc-init ]] || {
-                echo -e "\${RED}[FAIL]\${NC} OpenRC init executable is missing or invalid."
-                exit 1
-            }
-            ;;
-    esac
     if [[ \${#REMOVED_PACKAGES[@]} -gt 0 ]]; then
-        STILL_INSTALLED=()
-        for pkg in "\${REMOVED_PACKAGES[@]}"; do
-            pacman -Qq "\$pkg" &>/dev/null && STILL_INSTALLED+=("\$pkg")
-        done
+        echo -e "\${CYAN}[SYNC]\${NC} Removing packages no longer declared..."
+        pacman -Rnsdd --noconfirm "\${PACMAN_ASK_ARGS[@]}" "\${REMOVED_PACKAGES[@]}"
+    fi
 
-        if [[ \${#STILL_INSTALLED[@]} -gt 0 ]]; then
-            echo -e "\${CYAN}[SYNC]\${NC} Removing packages no longer declared..."
-            pacman -Rnsdd --noconfirm "\${PACMAN_ASK_ARGS[@]}" "\${STILL_INSTALLED[@]}"
+    : > "\$PACKAGE_STATE"
+    for target in "\${!desired_target_kind[@]}"; do
+        if [[ "\${desired_target_kind[\$target]}" == "group" ]]; then
+            members="\${desired_group_members[\$target]}"
+            compact_members="\$(tr '\n' ' ' <<< "\$members" | sed 's/[[:space:]]*\$//')"
+            printf 'group|%s|%s\n' "\$target" "\$compact_members" >> "\$PACKAGE_STATE"
+        else
+            printf 'package|%s\n' "\$target" >> "\$PACKAGE_STATE"
         fi
-    fi        
+    done
+    sort -o "\$PACKAGE_STATE" "\$PACKAGE_STATE"
 
     CURRENT_KERNEL_SORTED="\$(printf '%s\n' "\${KERNEL_PKGS_LIST[@]}" | sort)"
     PREVIOUS_KERNEL_SORTED=""
@@ -811,8 +741,8 @@ if [[ "\$ACTION" == "sync" ]]; then
             grub-mkconfig -o /boot/grub/grub.cfg
         fi
     fi
+    printf '%s\n' "\${KERNEL_PKGS_LIST[@]}" | sort > "\$KERNEL_STATE"
 fi
-
 
 declare -A desired_user=()
 declare -A desired_groups=()
@@ -1113,25 +1043,10 @@ if [[ "\$ACTION" == "sync" && -n "\$DECLARED_TIMEZONE" ]]; then
     fi
 fi
 
-: > "\$PACKAGE_STATE"
-for target in "\${!desired_target_kind[@]}"; do
-    if [[ "\${desired_target_kind[\$target]}" == "group" ]]; then
-        members="\${desired_group_members[\$target]}"
-        compact_members="\$(tr '\n' ' ' <<< "\$members" | sed 's/[[:space:]]*\$//')"
-        printf 'group|%s|%s\n' "\$target" "\$compact_members" >> "\$PACKAGE_STATE"
-    else
-        printf 'package|%s\n' "\$target" >> "\$PACKAGE_STATE"
-    fi
-done
-sort -o "\$PACKAGE_STATE" "\$PACKAGE_STATE"
-
-
-printf '%s\n' "\${KERNEL_PKGS_LIST[@]}" | sort > "\$KERNEL_STATE"
 printf '%s\n' "\${!wanted_services[@]}" | sort > "\$SERVICE_STATE"
 printf '%s\n' "\${!desired_user[@]}" | sort > "\$USER_STATE"
 printf '%s\n' "\${!reconciled_user_services[@]}" | sort > "\$USER_SERVICE_STATE"
 printf '%s\n' "\${BLACKLIST_PKGS[@]}" | sort > "\$BLACKLIST_STATE"
-printf '%s\n' "\$INIT" > "\$INIT_STATE"
 
 echo -e "\${GREEN}[OK]\${NC} APK reconciliation complete."
 APK_EOF
@@ -1142,7 +1057,7 @@ info "Using the manifest at /etc/daras/daras.conf."
 
 info "Synchronizing declarative package state..."
 apk sync
-pacman -S geocode-glib --noconfirm
+pacman -Rnsdd geocode-glib-common --noconfirm && pacman -S geocode-glib --noconfirm
 
 mkdir -p /usr/share/icons/hicolor/scalable/apps/ && mkdir -p /usr/share/pixmaps/
 if [ -f others/daras.svg ]; then
