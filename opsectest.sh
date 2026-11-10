@@ -80,19 +80,7 @@ else
 fi
 echo ""
 
-while true; do
-    ask "Init system?"
-    ask "  1) OpenRC"
-    ask "  2) dinit"
-    read -rp "  Choice [1/2]: " INIT_CHOICE
-    case "$INIT_CHOICE" in
-        1) INIT_SYSTEM="openrc"; break ;;
-        2) INIT_SYSTEM="dinit"; break ;;
-        *) warn "Invalid choice. Enter 1 or 2." ;;
-    esac
-done
-echo ""
-info "Selected: boot=$BOOT_MODE  init=$INIT_SYSTEM"
+info "Selected: boot=$BOOT_MODE"
 echo ""
 
 info "============================================================"
@@ -126,7 +114,6 @@ SYSTEM_PKGS="linux linux-firmware sof-firmware base base-devel"
     if ! grep -q '^\[system\]$' "$MANIFEST_SOURCE"; then
         die "Existing manifest is missing [system]."
     fi
-    sed -i -E '/^\[system\]$/,/^\[/ s/^[[:space:]]*init[[:space:]]*=.*/init = '"$INIT_SYSTEM"'/' "$MANIFEST_SOURCE"
     info "Using existing configuration: $MANIFEST_SOURCE"
 else
     MANIFEST_SOURCE="/tmp/daras-template.conf"
@@ -153,17 +140,12 @@ else
     fi
 
     SERVICE_PKGS="dbus networkmanager cronie turnstile"
-    ENABLED_SERVICES="dbus elogind NetworkManager cronie"
-    if [ "$INIT_SYSTEM" = "openrc" ]; then
-        ENABLED_SERVICES="$ENABLED_SERVICES turnstile"
-    else
-        ENABLED_SERVICES="$ENABLED_SERVICES turnstiled"
-    fi
+    ENABLED_SERVICES="dbus elogind NetworkManager cronie turnstiled"
 
     cat > "$MANIFEST_SOURCE" <<EOF
 [system]
 pkgs = { $SYSTEM_PKGS }
-init = $INIT_SYSTEM
+init = dinit
 
 [bootmgr]
 pkgs = { $BOOTMGR_PKGS }
@@ -214,6 +196,17 @@ EOF
     read -rp "  Press ENTER to open the editor..."
     "$EDITOR_CHOICE" "$MANIFEST_SOURCE"
 fi
+
+INIT_SYSTEM="$(awk '/^\[system\]/{f=1; next} /^\[/{f=0} f && /^[[:space:]]*init[[:space:]]*=/ {sub(/^[^=]*=[[:space:]]*/, ""); print; exit}' "$MANIFEST_SOURCE")"
+
+case "$INIT_SYSTEM" in
+    openrc|dinit) ;;
+    *)
+        die "Invalid or missing init in [system]: '$INIT_SYSTEM'. Choose 'openrc' or 'dinit'."
+        ;;
+esac
+
+info "Selected init from manifest: $INIT_SYSTEM"
 
 SYSTEM_PKGS="$(awk '/^\[system\]/{f=1; next} /^\[/{f=0} f' "$MANIFEST_SOURCE" | grep -m1 'pkgs' | sed -E 's/.*\{(.*)\}.*/\1/' | xargs)"
 
@@ -331,6 +324,7 @@ USER_STATE="\$STATE_DIR/users.state"
 USER_SERVICE_STATE="\$STATE_DIR/user-services.state"
 KERNEL_STATE="\$STATE_DIR/kernel.state"
 BLACKLIST_STATE="\$STATE_DIR/blacklist.state"
+INIT_STATE="\$STATE_DIR/init.state"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 
@@ -371,23 +365,17 @@ while [[ \$# -gt 0 ]]; do
 done
 
 PACMAN_ASK_ARGS=()
-
 if [[ "\$ALWAYS_YES" -eq 1 ]]; then
     PACMAN_ASK_ARGS+=(--ask=4)
 fi
-
 [[ -f "\$MANIFEST" ]] || { echo -e "\${RED}[FAIL]\${NC} Manifest '\$MANIFEST' not found!"; exit 1; }
-
 mkdir -p "\$STATE_DIR"
-
 echo -e "\${CYAN}[APK]\${NC} Reading manifest: \$MANIFEST"
-
 if [[ "\$ACTION" == "sync" ]]; then
-    echo -e "\${CYAN}[UPGRADE]\${NC} Running pacman -Syu..."
+    echo -e "\${CYAN}[UPGRADE]\${NC} Updating system packages..."
     pacman -Syu --noconfirm "\${PACMAN_ASK_ARGS[@]}"
 fi
 
-INIT="openrc"
 declare -a DECLARED_PKGS=()
 declare -a META_PKGS=()
 declare -a SERVICE_PKGS=()
@@ -402,6 +390,7 @@ declare -A USER_SERVICES=()
 WHEEL_SUDO_MODE=""
 DECLARED_HOSTNAME=""
 DECLARED_TIMEZONE=""
+INIT=""
 
 trim() {
     local x="\$1"
@@ -521,8 +510,12 @@ if [[ "\$CURRENT_BLACKLIST_SORTED" != "\$PREVIOUS_BLACKLIST_SORTED" ]]; then
 fi
 case "\$INIT" in
     openrc|dinit) ;;
-    *) echo -e "\${RED}[FAIL]\${NC} Invalid init '\$INIT'."; exit 1 ;;
+    *)
+        echo -e "\${RED}[FAIL]\${NC} Invalid init '\$INIT'. Choose 'openrc' or 'dinit'."
+        exit 1
+        ;;
 esac
+DECLARED_PKGS+=("\$INIT" "elogind-\$INIT")
 if [[ "\$BLACKLIST_CHANGED" -eq 1 ]]; then
     for bpkg in "\${BLACKLIST_PKGS[@]}"; do
         for ppkg in "\${PACKAGES_SECTION_PKGS[@]}"; do
@@ -594,6 +587,25 @@ MISSING_TARGETS=()
 MISSING_PACKAGES=()
 REMOVED_TARGETS=()
 REMOVED_PACKAGES=()
+PREVIOUS_INIT=""
+
+if [[ -f "\$INIT_STATE" ]]; then
+    read -r PREVIOUS_INIT < "\$INIT_STATE"
+else
+    if [[ "\$INIT" == "openrc" ]] && pacman -Qq dinit &>/dev/null; then
+        PREVIOUS_INIT="dinit"
+    elif [[ "\$INIT" == "dinit" ]] && pacman -Qq openrc &>/dev/null; then
+        PREVIOUS_INIT="openrc"
+    fi
+fi
+if [[ -n "\$PREVIOUS_INIT" && "\$PREVIOUS_INIT" != "\$INIT" ]]; then
+    echo -e "\${CYAN}[INIT]\${NC} Switching from \$PREVIOUS_INIT to \$INIT."
+    for old_init_pkg in "\$PREVIOUS_INIT" "elogind-\$PREVIOUS_INIT"; do
+        if pacman -Qq "\$old_init_pkg" &>/dev/null; then
+            REMOVED_PACKAGES+=("\$old_init_pkg")
+        fi
+    done
+fi
 
 declare -A missing_pkg=()
 for target in "\${!desired_target_kind[@]}"; do
@@ -712,16 +724,55 @@ if [[ "\$ACTION" == "check" ]]; then
 fi
 
 if [[ "\$ACTION" == "sync" ]]; then
-    if [[ \${#MISSING_PACKAGES[@]} -gt 0 ]]; then
-        echo -e "\${CYAN}[SYNC]\${NC} Installing declared package/group members..."
-        pacman -S --needed --noconfirm "\${PACMAN_ASK_ARGS[@]}" "\${MISSING_PACKAGES[@]}"
-    fi
+    if [[ -n "\$PREVIOUS_INIT" && "\$PREVIOUS_INIT" != "\$INIT" ]]; then
+        echo -e "\${CYAN}[INIT]\${NC} Cleaning up services from \$PREVIOUS_INIT..."
+        if [[ "\$PREVIOUS_INIT" == "openrc" ]] && ! command -v rc-update >/dev/null 2>&1; then
+            echo -e "\${RED}[FAIL]\${NC} rc-update is unavailable; cannot clean up old OpenRC services."
+            exit 1
+        fi
+        if [[ -f "\$SERVICE_STATE" ]]; then
+            while IFS= read -r service; do
+                [[ -n "\$service" ]] || continue
 
+                case "\$PREVIOUS_INIT" in
+                    openrc)
+                        rc-update del "\$service" default || true
+                        ;;
+                    dinit)
+                        rm -f "/etc/dinit.d/boot.d/\$service"
+                        ;;
+                esac
+            done < "\$SERVICE_STATE"
+        fi
+        if [[ -f "\$USER_SERVICE_STATE" ]]; then
+            while IFS='|' read -r user service; do
+                [[ -n "\$user" && -n "\$service" ]] || continue
+
+                home="\$(getent passwd "\$user" 2>/dev/null | cut -d: -f6 || true)"
+                [[ -n "\$home" ]] || continue
+
+                case "\$PREVIOUS_INIT" in
+                    openrc)
+                        rm -f "\$home/.config/rc/runlevels/default/\$service"
+                        ;;
+                    dinit)
+                        rm -f "\$home/.config/dinit.d/boot.d/\$service"
+                        ;;
+                esac
+            done < "\$USER_SERVICE_STATE"
+        fi
+        : > "\$SERVICE_STATE"
+        : > "\$USER_SERVICE_STATE"
+        echo -e "\${GREEN}[INIT]\${NC} Previous init service registrations cleaned up."
+    fi
     if [[ \${#REMOVED_PACKAGES[@]} -gt 0 ]]; then
         echo -e "\${CYAN}[SYNC]\${NC} Removing packages no longer declared..."
         pacman -Rnsdd --noconfirm "\${PACMAN_ASK_ARGS[@]}" "\${REMOVED_PACKAGES[@]}"
     fi
-
+    if [[ \${#MISSING_PACKAGES[@]} -gt 0 ]]; then
+        echo -e "\${CYAN}[SYNC]\${NC} Installing declared package/group members..."
+        pacman -S --needed --noconfirm "\${PACMAN_ASK_ARGS[@]}" "\${MISSING_PACKAGES[@]}"
+    fi
     : > "\$PACKAGE_STATE"
     for target in "\${!desired_target_kind[@]}"; do
         if [[ "\${desired_target_kind[\$target]}" == "group" ]]; then
@@ -733,7 +784,6 @@ if [[ "\$ACTION" == "sync" ]]; then
         fi
     done
     sort -o "\$PACKAGE_STATE" "\$PACKAGE_STATE"
-
     CURRENT_KERNEL_SORTED="\$(printf '%s\n' "\${KERNEL_PKGS_LIST[@]}" | sort)"
     PREVIOUS_KERNEL_SORTED=""
     [[ -f "\$KERNEL_STATE" ]] && PREVIOUS_KERNEL_SORTED="\$(sort "\$KERNEL_STATE")"
@@ -744,7 +794,9 @@ if [[ "\$ACTION" == "sync" ]]; then
         fi
     fi
     printf '%s\n' "\${KERNEL_PKGS_LIST[@]}" | sort > "\$KERNEL_STATE"
+    printf '%s\n' "\$INIT" > "\$INIT_STATE"
 fi
+
 
 declare -A desired_user=()
 declare -A desired_groups=()
