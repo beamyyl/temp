@@ -371,10 +371,6 @@ fi
 [[ -f "\$MANIFEST" ]] || { echo -e "\${RED}[FAIL]\${NC} Manifest '\$MANIFEST' not found!"; exit 1; }
 mkdir -p "\$STATE_DIR"
 echo -e "\${CYAN}[APK]\${NC} Reading manifest: \$MANIFEST"
-if [[ "\$ACTION" == "sync" ]]; then
-    echo -e "\${CYAN}[UPGRADE]\${NC} Updating system packages..."
-    pacman -Syu --noconfirm "\${PACMAN_ASK_ARGS[@]}"
-fi
 
 declare -a DECLARED_PKGS=()
 declare -a META_PKGS=()
@@ -576,6 +572,11 @@ if [[ \${#invalid_targets[@]} -gt 0 ]]; then
     exit 1
 fi
 
+if [[ "\$ACTION" == "sync" ]]; then
+    echo -e "\${CYAN}[UPGRADE]\${NC} Updating system packages..."
+    pacman -Syu --noconfirm "\${PACMAN_ASK_ARGS[@]}"
+fi
+
 declare -a PREVIOUS_TARGETS=()
 if [[ -f "\$PACKAGE_STATE" ]]; then
     while IFS= read -r line; do
@@ -765,25 +766,42 @@ if [[ "\$ACTION" == "sync" ]]; then
         : > "\$USER_SERVICE_STATE"
         echo -e "\${GREEN}[INIT]\${NC} Previous init service registrations cleaned up."
     fi
-    if [[ \${#REMOVED_PACKAGES[@]} -gt 0 ]]; then
-        echo -e "\${CYAN}[SYNC]\${NC} Removing packages no longer declared..."
-        pacman -Rnsdd --noconfirm "\${PACMAN_ASK_ARGS[@]}" "\${REMOVED_PACKAGES[@]}"
-    fi
+
     if [[ \${#MISSING_PACKAGES[@]} -gt 0 ]]; then
         echo -e "\${CYAN}[SYNC]\${NC} Installing declared package/group members..."
         pacman -S --needed --noconfirm "\${PACMAN_ASK_ARGS[@]}" "\${MISSING_PACKAGES[@]}"
     fi
-    : > "\$PACKAGE_STATE"
-    for target in "\${!desired_target_kind[@]}"; do
-        if [[ "\${desired_target_kind[\$target]}" == "group" ]]; then
-            members="\${desired_group_members[\$target]}"
-            compact_members="\$(tr '\n' ' ' <<< "\$members" | sed 's/[[:space:]]*\$//')"
-            printf 'group|%s|%s\n' "\$target" "\$compact_members" >> "\$PACKAGE_STATE"
-        else
-            printf 'package|%s\n' "\$target" >> "\$PACKAGE_STATE"
+    case "\$INIT" in
+        dinit)
+            if [[ ! -s /usr/bin/dinit || ! -x /usr/bin/dinit ]]; then
+                echo -e "\${YELLOW}[WARN]\${NC} Dinit executable is missing or invalid. Reinstalling dinit-base..."
+                pacman -S --noconfirm dinit-base
+            fi
+
+            [[ -s /usr/bin/dinit && -x /usr/bin/dinit ]] || {
+                echo -e "\${RED}[FAIL]\${NC} Dinit executable verification failed."
+                exit 1
+            }
+            ;;
+        openrc)
+            [[ -s /usr/bin/openrc-init && -x /usr/bin/openrc-init ]] || {
+                echo -e "\${RED}[FAIL]\${NC} OpenRC init executable is missing or invalid."
+                exit 1
+            }
+            ;;
+    esac
+    if [[ \${#REMOVED_PACKAGES[@]} -gt 0 ]]; then
+        STILL_INSTALLED=()
+        for pkg in "\${REMOVED_PACKAGES[@]}"; do
+            pacman -Qq "\$pkg" &>/dev/null && STILL_INSTALLED+=("\$pkg")
+        done
+
+        if [[ \${#STILL_INSTALLED[@]} -gt 0 ]]; then
+            echo -e "\${CYAN}[SYNC]\${NC} Removing packages no longer declared..."
+            pacman -Rnsdd --noconfirm "\${PACMAN_ASK_ARGS[@]}" "\${STILL_INSTALLED[@]}"
         fi
-    done
-    sort -o "\$PACKAGE_STATE" "\$PACKAGE_STATE"
+    fi        
+
     CURRENT_KERNEL_SORTED="\$(printf '%s\n' "\${KERNEL_PKGS_LIST[@]}" | sort)"
     PREVIOUS_KERNEL_SORTED=""
     [[ -f "\$KERNEL_STATE" ]] && PREVIOUS_KERNEL_SORTED="\$(sort "\$KERNEL_STATE")"
@@ -793,8 +811,6 @@ if [[ "\$ACTION" == "sync" ]]; then
             grub-mkconfig -o /boot/grub/grub.cfg
         fi
     fi
-    printf '%s\n' "\${KERNEL_PKGS_LIST[@]}" | sort > "\$KERNEL_STATE"
-    printf '%s\n' "\$INIT" > "\$INIT_STATE"
 fi
 
 
@@ -1097,10 +1113,25 @@ if [[ "\$ACTION" == "sync" && -n "\$DECLARED_TIMEZONE" ]]; then
     fi
 fi
 
+: > "\$PACKAGE_STATE"
+for target in "\${!desired_target_kind[@]}"; do
+    if [[ "\${desired_target_kind[\$target]}" == "group" ]]; then
+        members="\${desired_group_members[\$target]}"
+        compact_members="\$(tr '\n' ' ' <<< "\$members" | sed 's/[[:space:]]*\$//')"
+        printf 'group|%s|%s\n' "\$target" "\$compact_members" >> "\$PACKAGE_STATE"
+    else
+        printf 'package|%s\n' "\$target" >> "\$PACKAGE_STATE"
+    fi
+done
+sort -o "\$PACKAGE_STATE" "\$PACKAGE_STATE"
+
+
+printf '%s\n' "\${KERNEL_PKGS_LIST[@]}" | sort > "\$KERNEL_STATE"
 printf '%s\n' "\${!wanted_services[@]}" | sort > "\$SERVICE_STATE"
 printf '%s\n' "\${!desired_user[@]}" | sort > "\$USER_STATE"
 printf '%s\n' "\${!reconciled_user_services[@]}" | sort > "\$USER_SERVICE_STATE"
 printf '%s\n' "\${BLACKLIST_PKGS[@]}" | sort > "\$BLACKLIST_STATE"
+printf '%s\n' "\$INIT" > "\$INIT_STATE"
 
 echo -e "\${GREEN}[OK]\${NC} APK reconciliation complete."
 APK_EOF
@@ -1111,7 +1142,7 @@ info "Using the manifest at /etc/daras/daras.conf."
 
 info "Synchronizing declarative package state..."
 apk sync
-pacman -Rnsdd geocode-glib-common --noconfirm && pacman -S geocode-glib --noconfirm
+pacman -S geocode-glib --noconfirm
 
 mkdir -p /usr/share/icons/hicolor/scalable/apps/ && mkdir -p /usr/share/pixmaps/
 if [ -f others/daras.svg ]; then
