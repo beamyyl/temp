@@ -1050,8 +1050,10 @@ apk sync
 pacman -Rnsdd geocode-glib-common --noconfirm && pacman -S geocode-glib --noconfirm
 
 mkdir -p /usr/share/icons/hicolor/scalable/apps/ && mkdir -p /usr/share/pixmaps/
-cp logo/daras.svg /usr/share/icons/hicolor/scalable/apps/daras.svg
-cp logo/daras.svg /usr/share/pixmaps/daras.svg
+if [ -f others/daras.svg ]; then
+    cp others/daras.svg /usr/share/icons/hicolor/scalable/apps/daras.svg
+    cp others/daras.svg /usr/share/pixmaps/daras.svg
+fi
 
 if [ -f /etc/default/grub ]; then
     sed -i 's/GRUB_DISTRIBUTOR="Arch"/GRUB_DISTRIBUTOR="Daras"/' /etc/default/grub
