@@ -323,6 +323,7 @@ set -euo pipefail
 
 MANIFEST="/etc/daras/daras.conf"
 ACTION="sync"
+ALWAYS_YES=0
 STATE_DIR="/var/lib/apk"
 PACKAGE_STATE="\$STATE_DIR/packages.state"
 SERVICE_STATE="\$STATE_DIR/services.state"
@@ -345,15 +346,20 @@ while [[ \$# -gt 0 ]]; do
     case "\$1" in
         sync) ACTION="sync"; shift ;;
         check|-c|--check) ACTION="check"; shift ;;
+        --always-yes)
+            ALWAYS_YES=1
+            shift
+            ;;
         --path|-p)
             [[ \$# -ge 2 ]] || { echo -e "\${RED}[FAIL]\${NC} --path requires a manifest path."; exit 1; }
             MANIFEST="\$2"
             shift 2
             ;;
         -h|--help)
-            echo "Usage: apk [sync|check] [--path /path/to/manifest]"
-            echo "  sync   Reconcile the manifest and run pacman -Syu first (default)."
-            echo "  check  Check declarative state without changing anything."
+            echo "Usage: apk [sync|check] [--always-yes] [--path /path/to/manifest]"
+            echo "  sync          Reconcile the manifest and run pacman -Syu first (default)."
+            echo "  check         Check declarative state without changing anything."
+            echo "  --always-yes  Automatically accepts package-conflict removal prompts."
             exit 0
             ;;
         --sync|-s)
@@ -364,6 +370,12 @@ while [[ \$# -gt 0 ]]; do
     esac
 done
 
+PACMAN_ASK_ARGS=()
+
+if [[ "\$ALWAYS_YES" -eq 1 ]]; then
+    PACMAN_ASK_ARGS+=(--ask=4)
+fi
+
 [[ -f "\$MANIFEST" ]] || { echo -e "\${RED}[FAIL]\${NC} Manifest '\$MANIFEST' not found!"; exit 1; }
 
 mkdir -p "\$STATE_DIR"
@@ -372,7 +384,7 @@ echo -e "\${CYAN}[APK]\${NC} Reading manifest: \$MANIFEST"
 
 if [[ "\$ACTION" == "sync" ]]; then
     echo -e "\${CYAN}[UPGRADE]\${NC} Running pacman -Syu..."
-    pacman -Syu --noconfirm
+    pacman -Syu --noconfirm "\${PACMAN_ASK_ARGS[@]}"
 fi
 
 INIT="openrc"
@@ -702,12 +714,12 @@ fi
 if [[ "\$ACTION" == "sync" ]]; then
     if [[ \${#MISSING_PACKAGES[@]} -gt 0 ]]; then
         echo -e "\${CYAN}[SYNC]\${NC} Installing declared package/group members..."
-        pacman -S --needed --noconfirm "\${MISSING_PACKAGES[@]}"
+        pacman -S --needed --noconfirm "\${PACMAN_ASK_ARGS[@]}" "\${MISSING_PACKAGES[@]}"
     fi
 
     if [[ \${#REMOVED_PACKAGES[@]} -gt 0 ]]; then
         echo -e "\${CYAN}[SYNC]\${NC} Removing packages no longer declared..."
-        pacman -Rnsdd --noconfirm "\${REMOVED_PACKAGES[@]}"
+        pacman -Rnsdd --noconfirm "\${PACMAN_ASK_ARGS[@]}" "\${REMOVED_PACKAGES[@]}"
     fi
 
     : > "\$PACKAGE_STATE"
